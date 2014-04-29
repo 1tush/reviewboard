@@ -1,4 +1,4 @@
-from __future__ import unicode_literals
+afrom __future__ import unicode_literals
 
 import logging
 import pkg_resources
@@ -389,7 +389,7 @@ class LDAPBackend(AuthBackend):
 
             # Now that we have the user, attempt to bind to verify
             # authentication
-            logging.debug("Attempting to authenticate as %s" % userdn)
+            logging.debug("Attempting to authenticate as %s" % userdn.decode('utf-8'))
             ldapo.bind_s(userdn, password)
 
             return self.get_or_create_user(username, None, ldapo, userdn)
