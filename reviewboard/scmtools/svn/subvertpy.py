@@ -41,6 +41,9 @@ class Client(base.Client):
         auth_providers = [
             ra.get_simple_provider(),
             ra.get_username_provider(),
+            ra.get_ssl_client_cert_file_provider(),
+            ra.get_ssl_client_cert_pw_file_provider(),
+            ra.get_ssl_server_trust_file_provider(),
         ]
         if repopath.startswith('https:'):
             auth_providers.append(
