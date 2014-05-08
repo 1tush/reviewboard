@@ -544,6 +544,12 @@ class ReviewRequestTests(TestCase):
         review_request.close(ReviewRequest.SUBMITTED)
         self.assertTrue(review_request.public)
 
+    def test_unicode_summary_and_str(self):
+        """Testing ReviewRequest.__str__ with unicode summaries."""
+        review_request = self.create_review_request(
+            summary='\u203e\u203e', publish=True)
+        self.assertEqual(six.text_type(review_request), '\u203e\u203e')
+
 
 class ViewTests(TestCase):
     """Tests for views in reviewboard.reviews.views"""
@@ -1226,7 +1232,7 @@ class PostCommitTests(SpyAgency, TestCase):
         self.assertEqual(diffset.files.count(), 1)
 
         fileDiff = diffset.files.get()
-        self.assertEqual(fileDiff.source_file, '/readme')
+        self.assertEqual(fileDiff.source_file, 'readme')
         self.assertEqual(fileDiff.source_revision, 'd6613f5')
 
     def test_update_from_committed_change_with_markdown_escaping(self):

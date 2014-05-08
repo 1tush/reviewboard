@@ -350,8 +350,8 @@ class GitHub(HostingService):
     repository_url_patterns = patterns(
         '',
 
-        url(r'^hooks/post-receive/$',
-            'reviewboard.hostingsvcs.github._process_post_receive_hook'),
+        url(r'^hooks/close-submitted/$',
+            'reviewboard.hostingsvcs.github.post_receive_hook_close_submitted'),
     )
 
     # This should be the prefix for every field on the plan forms.
@@ -756,7 +756,7 @@ class GitHub(HostingService):
 
 
 @require_POST
-def _process_post_receive_hook(request, *args, **kwargs):
+def post_receive_hook_close_submitted(request, *args, **kwargs):
     """Closes review requests as submitted automatically after a push."""
     try:
         payload = json.loads(request.body)
@@ -783,17 +783,19 @@ def _get_review_id_to_commits_map(payload, server_url):
     """
     review_id_to_commits_map = defaultdict(list)
 
-    ref_name = payload.get('ref', None)
-    branch_name = get_git_branch_name(ref_name)
+    ref_name = payload.get('ref')
+    if not ref_name:
+        return None
 
+    branch_name = get_git_branch_name(ref_name)
     if not branch_name:
         return None
 
     commits = payload.get('commits', [])
 
     for commit in commits:
-        commit_hash = commit.get('id', None)
-        commit_message = commit.get('message', None)
+        commit_hash = commit.get('id')
+        commit_message = commit.get('message')
         review_request_id = get_review_request_id(commit_message, server_url,
                                                   commit_hash)
 

@@ -264,17 +264,26 @@ input[type=submit].btn {
   cursor: pointer;
 }
 
-h1.title,
+.box-head,
 .modalbox-title {
   background: @box-title-bg;
   border-bottom: 1px #728eac solid;
   margin: 0;
   padding: 0.4em 0.6em;
-  font-size: 120%;
   .border-radius(@box-border-radius @box-border-radius 0 0);
 }
 
-.box .main {
+.box-title,
+.modalbox-title {
+  font-size: 120%;
+}
+
+.box-title {
+  margin: 0;
+  padding: 0;
+}
+
+.box-main {
   padding: 5px;
 }
 
@@ -725,9 +734,9 @@ form table td {
 }
 
 #manual-updates {
-  padding: 1em;
+  padding-top: 1em;
 
-  .main {
+  .box-main {
     padding: 1em;
 
     h1, h2 {
