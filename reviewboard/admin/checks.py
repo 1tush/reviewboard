@@ -30,7 +30,6 @@
 from __future__ import unicode_literals
 
 import getpass
-import imp
 import os
 import sys
 
@@ -42,6 +41,7 @@ from djblets.util.filesystem import is_exe_in_path
 from djblets.siteconfig.models import SiteConfiguration
 
 from reviewboard import get_version_string
+from reviewboard.admin.import_utils import has_module
 
 
 _install_fine = False
@@ -214,35 +214,11 @@ def reset_check_cache():
     _install_fine = False
 
 
-def get_can_enable_syntax_highlighting():
-    """Checks whether syntax highlighting can be enabled."""
-    try:
-        import pygments
-
-        version = pygments.__version__.split(".")
-
-        if int(version[0]) > 0 or int(version[1]) >= 9:
-            return (True, None)
-        else:
-            return (False, _(
-                'Pygments %(cur_version)s is installed, but '
-                '%(required_version)s or higher is required '
-                'to use syntax highlighting.'
-            ) % {'cur_version': pygments.__version__,
-                 'required_version': "0.9"})
-    except ImportError:
-        return (False, _(
-            'Syntax highlighting requires the <a href="%(url)s">Pygments</a> '
-            'library, which is not installed.'
-        ) % {'url': "http://www.pygments.org/"})
-
-
 def get_can_enable_ldap():
     """Checks whether LDAP authentication can be enabled."""
-    try:
-        imp.find_module("ldap")
+    if has_module('ldap'):
         return (True, None)
-    except ImportError:
+    else:
         return (False, _(
             'LDAP authentication requires the python-ldap library, which '
             'is not installed.'
@@ -251,12 +227,9 @@ def get_can_enable_ldap():
 
 def get_can_enable_dns():
     """Checks whether we can query DNS to find the domain controller to use."""
-    try:
-        # XXX for reasons I don't understand imp.find_module doesn't work
-        #imp.find_module("DNS")
-        import DNS
+    if has_module('DNS'):
         return (True, None)
-    except ImportError:
+    else:
         return (False, _(
             'PyDNS, which is required to find the domain controller, '
             'is not installed.'
@@ -266,22 +239,21 @@ def get_can_enable_dns():
 def get_can_use_amazon_s3():
     """Checks whether django-storages (Amazon S3 backend) is installed."""
     try:
-        from storages.backends.s3boto import S3BotoStorage
-        return (True, None)
+        if has_module('storages.backends.s3boto', members=['S3BotoStorage']):
+            return (True, None)
+        else:
+            return (False, _(
+                'Amazon S3 depends on django-storages, which is not installed'
+            ))
     except ImproperlyConfigured as e:
         return (False, _('Amazon S3 backend failed to load: %s') % e)
-    except ImportError:
-        return (False, _(
-            'Amazon S3 depends on django-storages, which is not installed'
-        ))
 
 
 def get_can_use_couchdb():
     """Checks whether django-storages (CouchDB backend) is installed."""
-    try:
-        from storages.backends.couchdb import CouchDBStorage
+    if has_module('storages.backends.couchdb', members=['CouchDBStorage']):
         return (True, None)
-    except ImportError:
+    else:
         return (False, _(
             'CouchDB depends on django-storages, which is not installed'
         ))

@@ -51,9 +51,9 @@ USE_I18N = True
 
 # List of callables that know how to import templates from various sources.
 TEMPLATE_LOADERS = (
-    ('django.template.loaders.cached.Loader', (
+    ('djblets.template.loaders.conditional_cached.Loader', (
         'django.template.loaders.filesystem.Loader',
-        'django.template.loaders.app_directories.Loader',
+        'djblets.template.loaders.namespaced_app_dirs.Loader',
         'djblets.extensions.loaders.load_template_source',
     )),
 )
@@ -153,7 +153,6 @@ RB_BUILTIN_APPS = [
     'djblets.pipeline',
     'djblets.siteconfig',
     'djblets.util',
-    'djblets.webapi',
     'haystack',
     'pipeline',  # Must be after djblets.pipeline
     'reviewboard',
@@ -161,22 +160,34 @@ RB_BUILTIN_APPS = [
     'reviewboard.admin',
     'reviewboard.attachments',
     'reviewboard.changedescs',
-    'reviewboard.datagrids',
     'reviewboard.diffviewer',
     'reviewboard.extensions',
     'reviewboard.hostingsvcs',
     'reviewboard.notifications',
     'reviewboard.reviews',
-    'reviewboard.reviews.ui',
     'reviewboard.scmtools',
     'reviewboard.site',
-    'reviewboard.ssh',
     'reviewboard.webapi',
 ]
+
+# If installed, add django_reset to INSTALLED_APPS. This is used for the
+# 'manage.py reset' command, which is very useful during development.
+try:
+    import django_reset
+    RB_BUILTIN_APPS.append('django_reset')
+except ImportError:
+    pass
+
 RB_EXTRA_APPS = []
 
 WEB_API_ENCODERS = (
     'djblets.webapi.encoders.ResourceAPIEncoder',
+)
+
+# The backends that are used to authenticate requests against the web API.
+WEB_API_AUTH_BACKENDS = (
+    'djblets.webapi.auth.WebAPIBasicAuthBackend',
+    'reviewboard.webapi.auth_backends.WebAPITokenAuthBackend',
 )
 
 SESSION_ENGINE = 'django.contrib.sessions.backends.cached_db'
@@ -208,7 +219,7 @@ TEST_RUNNER = 'reviewboard.test.RBTestRunner'
 # start out, instead of encountering them later on.  Most of the magic for this
 # happens in manage.py, not here.
 install_help = '''
-Please see http://www.reviewboard.org/docs/manual/dev/admin/
+Please see https://www.reviewboard.org/docs/manual/dev/admin/
 for help setting up Review Board.
 '''
 
@@ -235,8 +246,10 @@ SESSION_COOKIE_NAME = "rbsessionid"
 SESSION_COOKIE_AGE = 365 * 24 * 60 * 60  # 1 year
 
 # Default support settings
-DEFAULT_SUPPORT_URL = 'http://www.beanbaginc.com/support/reviewboard/' \
-                      '?support-data=%(support_data)s'
+SUPPORT_URL_BASE = 'https://www.beanbaginc.com/support/reviewboard/'
+DEFAULT_SUPPORT_URL = SUPPORT_URL_BASE + '?support-data=%(support_data)s'
+REGISTER_SUPPORT_URL = (SUPPORT_URL_BASE +
+                        'register/?support-data=%(support_data)s')
 
 # Regular expression and flags used to match review request IDs in commit
 # messages for hosting service webhooks. These can be overriden in
@@ -244,6 +257,15 @@ DEFAULT_SUPPORT_URL = 'http://www.beanbaginc.com/support/reviewboard/' \
 HOSTINGSVCS_HOOK_REGEX = (r'(?:Reviewed at %(server_url)sr/|Review request #)'
                            '(?P<id>\d+)')
 HOSTINGSVCS_HOOK_REGEX_FLAGS = re.IGNORECASE
+
+
+# The SVN backends to attempt to load, in order. This is useful if more than
+# one type of backend is installed on a server, and you need to force usage
+# of a specific one.
+SVNTOOL_BACKENDS = [
+    'reviewboard.scmtools.svn.pysvn',
+    'reviewboard.scmtools.svn.subvertpy',
+]
 
 
 # Load local settings.  This can override anything in here, but at the very

@@ -33,7 +33,7 @@ from django.views.generic import RedirectView
 from reviewboard.admin import forms
 
 
-NEWS_FEED = "http://www.reviewboard.org/news/feed/"
+NEWS_FEED = "https://www.reviewboard.org/news/feed/"
 
 settings_urlpatterns = patterns(
     'reviewboard.admin.views',
@@ -77,6 +77,7 @@ urlpatterns = patterns(
     (r'^settings/', include(settings_urlpatterns)),
     (r'^widget-toggle/', 'widget_toggle'),
     (r'^widget-move/', 'widget_move'),
+    (r'^widget-select/', 'widget_select'),
     (r'^widget-activity/', 'widget_activity'),
     url(r'^security/$', 'security', name='admin-security-checks'),
 )

@@ -42,8 +42,18 @@ class ResourceTests(BaseWebAPITestCase):
         return (get_repository_branches_url(repository, local_site_name),
                 repository_branches_item_mimetype,
                 [
-                    {'name': 'trunk', 'commit': '5', 'default': True},
-                    {'name': 'branch1', 'commit': '7', 'default': False},
+                    {
+                        'id': 'trunk',
+                        'name': 'trunk',
+                        'commit': '5',
+                        'default': True
+                    },
+                    {
+                        'id': 'branch1',
+                        'name': 'branch1',
+                        'commit': '7',
+                        'default': False
+                    },
                 ])
 
     def test_get_with_no_support(self):
@@ -52,7 +62,7 @@ class ResourceTests(BaseWebAPITestCase):
         """
         repository = self.create_repository(tool_name='CVS')
 
-        rsp = self.apiGet(get_repository_branches_url(repository),
-                          expected_status=501)
+        rsp = self.api_get(get_repository_branches_url(repository),
+                           expected_status=501)
         self.assertEqual(rsp['stat'], 'fail')
         self.assertEqual(rsp['err']['code'], REPO_NOT_IMPLEMENTED.code)

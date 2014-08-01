@@ -4,12 +4,18 @@
 Review Board Release Notes
 ==========================
 
-2.0 Releases (in-development)
-=============================
+2.0 Releases
+============
 
 .. toctree::
    :maxdepth: 1
 
+   2.0.5
+   2.0.4
+   2.0.3
+   2.0.2
+   2.0.1
+   2.0
    2.0-rc-3
    2.0-rc-2
    2.0-rc-1
@@ -24,6 +30,8 @@ Review Board Release Notes
 .. toctree::
    :maxdepth: 1
 
+   1.7.27
+   1.7.26
    1.7.25
    1.7.24
    1.7.23

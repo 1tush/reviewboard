@@ -15,8 +15,8 @@ from django.contrib.auth.models import User
 from django.http import HttpRequest
 from django.template.defaultfilters import title
 from djblets.util.http import is_mimetype_a
-from djblets.webapi.core import WebAPIResponseError
 from djblets.webapi.resources import get_resource_from_class, WebAPIResource
+from djblets.webapi.responses import WebAPIResponseError
 from docutils import nodes
 from docutils.parsers.rst import directives
 from docutils.statemachine import ViewList
@@ -72,6 +72,11 @@ class DummyRequest(HttpRequest):
         self.method = 'GET'
         self.path = ''
         self.user = User.objects.all()[0]
+        self.session = {}
+
+        # This is normally set internally by Djblets, but we don't
+        # go through the standard __call__ flow.
+        self._djblets_webapi_object_cache = {}
 
     def build_absolute_uri(self, location=None):
         if not self.path and not location:
@@ -265,8 +270,10 @@ class ResourceDirective(Directive):
         uri_template = get_resource_uri_template(resource, not is_list)
         append_detail_row(tbody, "URI", nodes.literal(text=uri_template))
 
-        # URI Parameters
-        #append_detail_row(tbody, "URI Parameters", '')
+        # Token Policy ID
+        if hasattr(resource, 'policy_id'):
+            append_detail_row(tbody, "Token Policy ID",
+                              nodes.literal(text=resource.policy_id))
 
         # HTTP Methods
         allowed_http_methods = self.get_http_methods(resource, is_list)
@@ -841,9 +848,12 @@ def uncamelcase(name, separator='_'):
 
 def get_resource_title(resource, is_list, append_resource=True):
     """Returns a human-readable name for the resource."""
-    class_name = resource.__class__.__name__
-    class_name = class_name.replace('Resource', '')
-    normalized_title = title(uncamelcase(class_name, ' '))
+    if hasattr(resource, 'verbose_name'):
+        normalized_title = resource.verbose_name
+    else:
+        class_name = resource.__class__.__name__
+        class_name = class_name.replace('Resource', '')
+        normalized_title = title(uncamelcase(class_name, ' '))
 
     if is_list:
         s = '%s List' % normalized_title

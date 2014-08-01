@@ -236,6 +236,8 @@ class DiffFragmentView(View):
             renderer = self.create_renderer(context, *args, **kwargs)
 
             return renderer.render_to_response()
+        except Http404:
+            raise
         except Exception as e:
             return exception_traceback(
                 self.request, e, self.error_template_name,
@@ -371,7 +373,10 @@ class DiffFragmentView(View):
             file = files[0]
 
             if 'index' in self.request.GET:
-                file['index'] = self.request.GET.get('index')
+                try:
+                    file['index'] = int(self.request.GET.get('index'))
+                except ValueError:
+                    pass
 
             return file
 

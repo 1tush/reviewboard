@@ -151,7 +151,7 @@ class GitDiffParser(DiffParser):
     """
     This class is able to parse diffs created with Git
     """
-    pre_creation_regexp = re.compile("^0+$")
+    pre_creation_regexp = re.compile(b"^0+$")
 
     def parse(self):
         """
@@ -160,7 +160,7 @@ class GitDiffParser(DiffParser):
         """
         self.files = []
         i = 0
-        preamble = ''
+        preamble = b''
 
         while i < len(self.lines):
             next_i, file_info, new_diff = self._parse_diff(i)
@@ -170,19 +170,19 @@ class GitDiffParser(DiffParser):
 
                 if preamble:
                     file_info.data = preamble + file_info.data
-                    preamble = ''
+                    preamble = b''
 
                 self.files.append(file_info)
             elif new_diff:
                 # We found a diff, but it was empty and has no file entry.
                 # Reset the preamble.
-                preamble = ''
+                preamble = b''
             else:
-                preamble += self.lines[i] + '\n'
+                preamble += self.lines[i] + b'\n'
 
             i = next_i
 
-        if not self.files and preamble.strip() != '':
+        if not self.files and preamble.strip() != b'':
             # This is probably not an actual git diff file.
             raise DiffParserError('This does not appear to be a git diff', 0)
 
@@ -297,7 +297,12 @@ class GitDiffParser(DiffParser):
                 empty_change = False
                 linenum = self.parse_diff_line(linenum, file_info)
 
-        if empty_change and not (file_info.moved or file_info.copied):
+        # For an empty change, we keep the file's info only if it is a new
+        # 0-length file, a moved file, a copied file, or a deleted 0-length
+        # file.
+        if (empty_change and
+            file_info.origInfo != PRE_CREATION and
+            not (file_info.moved or file_info.copied or file_info.deleted)):
             # We didn't find any interesting content, so leave out this
             # file's info.
             #
@@ -347,14 +352,14 @@ class GitDiffParser(DiffParser):
                     self.lines[linenum + 1].startswith(b'+++ ')))
 
     def _ensure_file_has_required_fields(self, file_info):
-        """
-        This is needed so that there aren't explosions higher up
-        the chain when the web layer is expecting a string object.
+        """Make sure that the file object has all expected fields.
 
+        This is needed so that there aren't explosions higher up the chain when
+        the web layer is expecting a string object.
         """
         for attr in ('origInfo', 'newInfo', 'data'):
             if getattr(file_info, attr) is None:
-                setattr(file_info, attr, '')
+                setattr(file_info, attr, b'')
 
 
 class GitClient(SCMClient):

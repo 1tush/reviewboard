@@ -1,10 +1,14 @@
 from __future__ import unicode_literals
 
+from time import time
+
 from django.contrib.auth.models import User
 from django.core.cache import cache
 from django.core.exceptions import ImproperlyConfigured, ValidationError
 from django.db import models
+from django.utils import timezone
 from django.utils.encoding import python_2_unicode_compatible
+from django.utils.functional import cached_property
 from django.utils.http import urlquote
 from django.utils.translation import ugettext_lazy as _
 from djblets.cache.backend import cache_memoize, make_cache_key
@@ -13,10 +17,12 @@ from djblets.log import log_timed
 from django.utils import six
 
 from reviewboard.hostingsvcs.models import HostingServiceAccount
+from reviewboard.hostingsvcs.service import get_hosting_service
 from reviewboard.scmtools.managers import RepositoryManager, ToolManager
 from reviewboard.scmtools.signals import (checked_file_exists,
                                           checking_file_exists,
                                           fetched_file, fetching_file)
+from reviewboard.scmtools.core import FileNotFoundError
 from reviewboard.site.models import LocalSite
 
 
@@ -117,6 +123,14 @@ class Repository(models.Model):
                     'shown when creating new review requests. Existing '
                     'review requests are unaffected.'))
 
+    archived = models.BooleanField(
+        _('Archived'),
+        default=False,
+        help_text=_("Archived repositories do not show up in lists of "
+                    "repositories, and aren't open to new review requests."))
+
+    archived_timestamp = models.DateTimeField(null=True, blank=True)
+
     # Access control
     local_site = models.ForeignKey(LocalSite,
                                    verbose_name=_('Local site'),
@@ -154,10 +168,26 @@ class Repository(models.Model):
         cls = self.tool.get_scmtool_class()
         return cls(self)
 
-    @property
+    @cached_property
     def hosting_service(self):
         if self.hosting_account:
             return self.hosting_account.service
+
+        return None
+
+    @cached_property
+    def bug_tracker_service(self):
+        """Returns selected bug tracker service if one exists."""
+        if self.extra_data.get('bug_tracker_use_hosting'):
+            return self.hosting_service
+        else:
+            bug_tracker_type = self.extra_data.get('bug_tracker_type')
+            if bug_tracker_type:
+                bug_tracker_cls = get_hosting_service(bug_tracker_type)
+
+                # TODO: we need to figure out some way of storing a second
+                # hosting service account for bug trackers.
+                return bug_tracker_cls(HostingServiceAccount())
 
         return None
 
@@ -196,6 +226,27 @@ class Repository(models.Model):
             'username': username,
             'password': password,
         }
+
+    def archive(self, save=True):
+        """Archives a repository.
+
+        The repository won't appear in any public lists of repositories,
+        and won't be used when looking up repositories. Review requests
+        can't be posted against an archived repository.
+
+        New repositories can be created with the same information as the
+        archived repository.
+        """
+        # This should be sufficiently unlikely to create duplicates. time()
+        # will use up a max of 8 characters, so we slice the name down to
+        # make the result fit in 64 characters
+        self.name = 'ar:%s:%x' % (self.name[:50], int(time()))
+        self.archived = True
+        self.public = False
+        self.archived_timestamp = timezone.now()
+
+        if save:
+            self.save()
 
     def get_file(self, path, revision, base_commit_id=None, request=None):
         """Returns a file from the repository.
@@ -258,7 +309,7 @@ class Repository(models.Model):
     def get_commit_cache_key(self, commit):
         return 'repository-commit:%s:%s' % (self.pk, commit)
 
-    def get_commits(self, start=None):
+    def get_commits(self, branch=None, start=None):
         """Returns a list of commits.
 
         This is paginated via the 'start' parameter. Any exceptions are
@@ -266,12 +317,19 @@ class Repository(models.Model):
         """
         hosting_service = self.hosting_service
 
-        cache_key = make_cache_key('repository-commits:%s:%s'
-                                   % (self.pk, start))
+        cache_key = make_cache_key('repository-commits:%s:%s:%s'
+                                   % (self.pk, branch, start))
+        commits_kwargs = {
+            'branch': branch,
+            'start': start,
+        }
+
         if hosting_service:
-            commits_callable = lambda: hosting_service.get_commits(self, start)
+            commits_callable = \
+                lambda: hosting_service.get_commits(self, **commits_kwargs)
         else:
-            commits_callable = lambda: self.get_scmtool().get_commits(start)
+            commits_callable = \
+                lambda: self.get_scmtool().get_commits(**commits_kwargs)
 
         # We cache both the entire list for 'start', as well as each individual
         # commit. This allows us to reduce API load when people are looking at
@@ -367,7 +425,16 @@ class Repository(models.Model):
                 revision,
                 base_commit_id=base_commit_id)
         else:
-            data = self.get_scmtool().get_file(path, revision)
+            try:
+                data = self.get_scmtool().get_file(path, revision)
+            except FileNotFoundError:
+                if base_commit_id:
+                    # Some funky workflows with mq (mercurial) can cause issues
+                    # with parent diffs. If we didn't find it with the parsed
+                    # revision, and there's a base commit ID, try that.
+                    data = self.get_scmtool().get_file(path, base_commit_id)
+                else:
+                    raise
 
         log_timer.done()
 
@@ -427,7 +494,13 @@ class Repository(models.Model):
 
     def get_encoding_list(self):
         """Returns a list of candidate text encodings for files"""
-        return self.encoding.split(',') or ['iso-8859-15']
+        encodings = []
+        for e in self.encoding.split(','):
+            e = e.strip()
+            if e:
+                encodings.append(e)
+
+        return encodings or ['iso-5589-15']
 
     def clean(self):
         """Clean method for checking null unique_together constraints.
@@ -458,4 +531,4 @@ class Repository(models.Model):
         # archiving repositories. We should really remove this constraint from
         # the tables and enforce it in code whenever visible=True
         unique_together = (('name', 'local_site'),
-                           ('path', 'local_site'))
+                           ('archived_timestamp', 'path', 'local_site'))

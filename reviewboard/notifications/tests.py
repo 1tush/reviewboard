@@ -146,8 +146,24 @@ class ReviewRequestEmailTests(TestCase, EmailTestHelper):
         message = mail.outbox[0].message()
         self.assertEqual(message['Sender'], self._get_sender(review.user))
 
+    def test_profile_should_send_email_setting(self):
+        """Testing the Profile.should_send_email setting"""
+        grumpy = User.objects.get(username='grumpy')
+        profile = grumpy.get_profile()
+        profile.should_send_email = False
+        profile.save()
+
+        review_request = self.create_review_request(
+            summary='My test review request')
+        review_request.target_people.add(grumpy)
+        review_request.target_people.add(User.objects.get(username='doc'))
+        review_request.publish(review_request.submitter)
+
+        self.assertEqual(len(mail.outbox), 1)
+        self.assertValidRecipients(['doc'])
+
     def test_review_close_no_email(self):
-        """Tests email is not generated when a review is closed and email
+        """Tests e-mail is not generated when a review is closed and e-mail
         setting is False
         """
         review_request = self.create_review_request()
@@ -162,7 +178,7 @@ class ReviewRequestEmailTests(TestCase, EmailTestHelper):
         self.assertEqual(len(mail.outbox), 0)
 
     def test_review_close_with_email(self):
-        """Tests email is generated when a review is closed and email setting
+        """Tests e-mail is generated when a review is closed and e-mail setting
         is True
         """
         siteconfig = SiteConfiguration.objects.get_current()

@@ -224,7 +224,11 @@ DraftBannerView = BannerView.extend({
      * Discards the draft of the review request.
      */
     _onDiscardDraftClicked: function() {
-        this.reviewRequest.draft.destroy();
+        this.reviewRequest.draft.destroy({
+            error: function(xhr) {
+                alert(xhr.errorText);
+            }
+        });
 
         return false;
     },
@@ -269,14 +273,22 @@ RB.ReviewRequestEditorView = Backbone.View.extend({
             useEditIconOnly: true,
             formatter: function(view, data, $el) {
                 var reviewRequest = view.model.get('reviewRequest'),
-                    bugTrackerURL = reviewRequest.get('bugTrackerURL');
+                    bugTrackerURL = reviewRequest.get('bugTrackerURL'),
+                    bugList,
+                    $bugList;
 
                 data = data || [];
 
                 if (bugTrackerURL) {
-                    $el.html(view.urlizeList(data, function(item) {
-                        return bugTrackerURL.replace('%s', item);
-                    }, _.escape));
+                    bugList = view.urlizeList(data, function(item) {
+                        return bugTrackerURL.replace('--bug_id--', item);
+                    });
+
+                    $bugList = $(bugList)
+                        .addClass('bug')
+                        .bug_infobox();
+
+                    $el.html($bugList);
                 } else {
                     $el.text(data.join(", "));
                 }
@@ -384,7 +396,9 @@ RB.ReviewRequestEditorView = Backbone.View.extend({
     initialize: function() {
         var $issueSummary = $('#issue-summary');
 
-        _.bindAll(this, '_resizeLayout');
+        _.bindAll(this, '_checkResizeLayout', '_onCloseDiscardedClicked',
+                  '_onCloseSubmittedClicked', '_onDeleteReviewRequestClicked',
+                  '_onUpdateDiffClicked');
 
         this._fieldEditors = {};
         this._hasFields = (this.$('.editable').length > 0);
@@ -545,9 +559,9 @@ RB.ReviewRequestEditorView = Backbone.View.extend({
              * Update the layout constraints any time these properties
              * change. Also, right away.
              */
-            $(window).resize(this._resizeLayout);
-            this.listenTo(this.model, 'change:editCount', this._resizeLayout);
-            this._resizeLayout();
+            $(window).resize(this._scheduleResizeLayout);
+            this.listenTo(this.model, 'change:editCount', this._checkResizeLayout);
+            this._checkResizeLayout();
 
             if (this.issueSummaryTableView) {
                 this.issueSummaryTableView.render();
@@ -574,7 +588,7 @@ RB.ReviewRequestEditorView = Backbone.View.extend({
 
         this._setupActions();
 
-        if (this._$bannersContainer.children().length > 0) {
+        if (this._$bannersContainer.children().filter(':visible').length > 0) {
             this.showBanner();
         }
 
@@ -672,13 +686,14 @@ RB.ReviewRequestEditorView = Backbone.View.extend({
             reviewRequestEditorView: this
         });
 
-        if (!$existingBanner) {
+        if ($existingBanner) {
+            $existingBanner.show();
+        } else {
             this.banner.$el.appendTo(this._$bannersContainer);
         }
 
         this.banner.render();
     },
-
 
     /*
      * Handler for when the Publish Draft button is clicked.
@@ -698,7 +713,7 @@ RB.ReviewRequestEditorView = Backbone.View.extend({
         if (fields.length === 0) {
             this.model.publishDraft();
         } else {
-            fields.inlineEditor("save");
+            fields.inlineEditor("submit");
         }
     },
 
@@ -749,7 +764,7 @@ RB.ReviewRequestEditorView = Backbone.View.extend({
 
         RB.formatText($el, text || '', reviewRequest.get('bugTrackerURL'));
 
-        $el.find('img').load(this._resizeLayout);
+        $el.find('img').load(this._checkResizeLayout);
     },
 
     /*
@@ -759,6 +774,7 @@ RB.ReviewRequestEditorView = Backbone.View.extend({
         var $closeDiscarded = this.$('#discard-review-request-link'),
             $closeSubmitted = this.$('#link-review-request-close-submitted'),
             $deletePermanently = this.$('#delete-review-request-link'),
+            $updateDiff = this.$('#upload-diff-link'),
             $menuitem;
 
         /* Provide support for expanding submenus in the action list. */
@@ -789,10 +805,10 @@ RB.ReviewRequestEditorView = Backbone.View.extend({
          * We don't want the click event filtering from these down to the
          * parent menu, so we can't use events above.
          */
-        $closeDiscarded.click(_.bind(this._onCloseDiscardedClicked, this));
-        $closeSubmitted.click(_.bind(this._onCloseSubmittedClicked, this));
-        $deletePermanently.click(_.bind(this._onDeleteReviewRequestClicked,
-                                        this));
+        $closeDiscarded.click(this._onCloseDiscardedClicked);
+        $closeSubmitted.click(this._onCloseSubmittedClicked);
+        $deletePermanently.click(this._onDeleteReviewRequestClicked);
+        $updateDiff.click(this._onUpdateDiffClicked);
     },
 
     /*
@@ -914,7 +930,6 @@ RB.ReviewRequestEditorView = Backbone.View.extend({
                 editIconClass: 'rb-icon rb-icon-edit',
                 enabled: this.model.get(editableProp),
                 multiline: multiline,
-                showButtons: multiline,
                 useEditIconOnly: fieldOptions.useEditIconOnly,
                 showRequiredFlag: $el.hasClass('required'),
                 deferEventSetup: _.has(fieldOptions, 'autocomplete')
@@ -970,7 +985,7 @@ RB.ReviewRequestEditorView = Backbone.View.extend({
                         }, fieldOptions),
                         this);
                 }, this),
-                resize: this._resizeLayout
+                resize: this._checkResizeLayout
             });
 
         this.listenTo(
@@ -1068,6 +1083,21 @@ RB.ReviewRequestEditorView = Backbone.View.extend({
     },
 
     /*
+     * Wrapper for _resizeLayout that verifies that there's actually a layout
+     * to resize.
+     */
+    _checkResizeLayout: function() {
+        /*
+         * Not every page that uses this has a #review_request_main element
+         * (for instance, review UIs want to have the draft banners but not
+         * the review request box). In this case, just skip all of this.
+         */
+        if (this._$main.length !== 0) {
+            this._resizeLayout();
+        }
+    },
+
+    /*
      * Resizes the layout in response to size or position changes of fields.
      *
      * This will spread out the main text fields to cover the full height of
@@ -1081,8 +1111,24 @@ RB.ReviewRequestEditorView = Backbone.View.extend({
             editing = $lastEditable.inlineEditor('editing'),
             $field = $lastEditable.inlineEditor('field'),
             editor = $field.data('markdown-editor'),
+            detailsWidth = 300, // Defined as @details-width in reviews.less
+            detailsPadding = 10,
+            $details = $('#review_request_details'),
+            $detailsBody = $details.find('tbody'),
+            $detailsLabels = $detailsBody.find('th:first-child'),
+            $detailsValues = $detailsBody.find('span'),
             contentHeight,
             height;
+
+        /*
+         * Make sure that the details fields wrap correctly, even if they don't
+         * have wrappable characters (this combines with the white-space:
+         * word-wrap: break-word style). This computation makes things handle
+         * potentially unknown field labels correctly.
+         */
+        $detailsValues.css('max-width', (detailsWidth -
+                                         $detailsLabels.outerWidth() -
+                                         detailsPadding * 3) + 'px');
 
         /*
          * Reset all the heights so we can do calculations based on their
@@ -1146,10 +1192,13 @@ RB.ReviewRequestEditorView = Backbone.View.extend({
 
     /*
      * Schedules a layout resize after the stack unwinds.
+     *
+     * This will only trigger a layout resize after the stack has unwound,
+     * and only once every 100 milliseconds at most.
      */
-    _scheduleResizeLayout: function() {
-        _.defer(this._resizeLayout);
-    },
+    _scheduleResizeLayout: _.throttle(function() {
+        _.defer(this._checkResizeLayout);
+    }, 100),
 
     /*
      * Formats the contents of a field.
@@ -1247,6 +1296,22 @@ RB.ReviewRequestEditorView = Backbone.View.extend({
             });
 
         return false;
+    },
+
+    /*
+     * Handler for Update -> Update Diff.
+     */
+    _onUpdateDiffClicked: function() {
+        var reviewRequest = this.model.get('reviewRequest');
+            updateDiffView = new RB.UpdateDiffView({
+                model: new RB.UploadDiffModel({
+                    changeNumber: reviewRequest.get('commitID'),
+                    repository: reviewRequest.get('repository'),
+                    reviewRequest: reviewRequest
+                })
+            });
+
+        updateDiffView.render();
     },
 
     _refreshPage: function() {

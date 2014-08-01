@@ -8,7 +8,6 @@ from djblets.webapi.errors import PERMISSION_DENIED
 
 from reviewboard.accounts.models import LocalSiteProfile
 from reviewboard.reviews.models import ReviewRequest, ReviewRequestDraft
-from reviewboard.site.models import LocalSite
 from reviewboard.webapi.resources import resources
 from reviewboard.webapi.tests.base import BaseWebAPITestCase
 from reviewboard.webapi.tests.mimetypes import \
@@ -129,7 +128,7 @@ class ResourceTests(ExtraDataListMixin, ExtraDataItemMixin,
         review_request = self.create_review_request(submitter=self.user,
                                                     publish=True)
 
-        rsp = self.apiPost(
+        rsp = self.api_post(
             get_review_request_draft_url(review_request),
             {'changedescription': changedesc},
             expected_mimetype=review_request_draft_item_mimetype)
@@ -203,7 +202,7 @@ class ResourceTests(ExtraDataListMixin, ExtraDataItemMixin,
         self.assertTrue(draft.rich_text)
         self.assertTrue(draft.changedesc.rich_text)
 
-        rsp = self.apiPut(
+        rsp = self.api_put(
             get_review_request_draft_url(review_request),
             {
                 'description': 'This is **Description**',
@@ -232,7 +231,7 @@ class ResourceTests(ExtraDataListMixin, ExtraDataItemMixin,
                                                     publish=True)
         commit_id = 'abc123'
 
-        rsp = self.apiPut(
+        rsp = self.api_put(
             get_review_request_draft_url(review_request),
             {
                 'commit_id': commit_id,
@@ -258,7 +257,7 @@ class ResourceTests(ExtraDataListMixin, ExtraDataItemMixin,
                                                     publish=True)
         commit_id = 'abc123'
 
-        rsp = self.apiPut(
+        rsp = self.api_put(
             get_review_request_draft_url(review_request),
             {
                 'commit_id': commit_id,
@@ -287,7 +286,7 @@ class ResourceTests(ExtraDataListMixin, ExtraDataItemMixin,
             summary='Dependency 2',
             publish=True)
 
-        rsp = self.apiPut(
+        rsp = self.api_put(
             get_review_request_draft_url(review_request),
             {'depends_on': '%s, %s' % (depends_1.pk, depends_2.pk)},
             expected_mimetype=review_request_draft_item_mimetype)
@@ -326,7 +325,7 @@ class ResourceTests(ExtraDataListMixin, ExtraDataItemMixin,
         # This isn't the review request we want to match.
         bad_depends = self.create_review_request(id=3, publish=True)
 
-        rsp = self.apiPut(
+        rsp = self.api_put(
             get_review_request_draft_url(review_request, self.local_site_name),
             {'depends_on': '3'},
             expected_mimetype=review_request_draft_item_mimetype)
@@ -352,7 +351,7 @@ class ResourceTests(ExtraDataListMixin, ExtraDataItemMixin,
         review_request = self.create_review_request(submitter=self.user,
                                                     publish=True)
 
-        rsp = self.apiPut(
+        rsp = self.api_put(
             get_review_request_draft_url(review_request),
             {'depends_on': '10000'},
             expected_status=400)
@@ -370,7 +369,7 @@ class ResourceTests(ExtraDataListMixin, ExtraDataItemMixin,
         review_request = self.create_review_request()
         self.assertNotEqual(review_request.submitter, self.user)
 
-        rsp = self.apiPut(
+        rsp = self.api_put(
             get_review_request_draft_url(review_request),
             {'bugs_closed': bugs_closed},
             expected_status=403)
@@ -395,7 +394,7 @@ class ResourceTests(ExtraDataListMixin, ExtraDataItemMixin,
 
         mail.outbox = []
 
-        rsp = self.apiPut(
+        rsp = self.api_put(
             get_review_request_draft_url(review_request),
             {'public': True},
             expected_mimetype=review_request_draft_item_mimetype)
@@ -429,9 +428,9 @@ class ResourceTests(ExtraDataListMixin, ExtraDataItemMixin,
         ]
         review_request.save()
 
-        self._create_update_review_request(self.apiPut, 200, review_request)
+        self._create_update_review_request(self.api_put, 200, review_request)
 
-        rsp = self.apiPut(
+        rsp = self.api_put(
             get_review_request_draft_url(review_request),
             {'public': True},
             expected_mimetype=review_request_draft_item_mimetype)
@@ -474,7 +473,7 @@ class ResourceTests(ExtraDataListMixin, ExtraDataItemMixin,
         """
         self.user = self._login_user(local_site=True)
 
-        local_site = LocalSite.objects.get(name=self.local_site_name)
+        local_site = self.get_local_site(name=self.local_site_name)
 
         site_profile = LocalSiteProfile.objects.create(
             local_site=local_site,
@@ -493,9 +492,9 @@ class ResourceTests(ExtraDataListMixin, ExtraDataItemMixin,
         self.user = self._login_user(local_site=True, admin=True)
 
         self._test_put_as_other_user(
-            LocalSite.objects.get(name=self.local_site_name))
+            self.get_local_site(name=self.local_site_name))
 
-    def _create_update_review_request(self, apiFunc, expected_status,
+    def _create_update_review_request(self, api_func, expected_status,
                                       review_request=None,
                                       local_site_name=None):
         summary = "My Summary"
@@ -523,7 +522,7 @@ class ResourceTests(ExtraDataListMixin, ExtraDataItemMixin,
         else:
             expected_mimetype = review_request_draft_item_mimetype
 
-        rsp = apiFunc(
+        rsp = api_func(
             get_review_request_draft_url(review_request, local_site_name),
             func_kwargs,
             expected_status=expected_status,
@@ -546,7 +545,8 @@ class ResourceTests(ExtraDataListMixin, ExtraDataItemMixin,
 
         return rsp
 
-    def _create_update_review_request_with_site(self, apiFunc, expected_status,
+    def _create_update_review_request_with_site(self, api_func,
+                                                expected_status,
                                                 relogin=True,
                                                 review_request=None):
         if relogin:
@@ -557,7 +557,7 @@ class ResourceTests(ExtraDataListMixin, ExtraDataItemMixin,
                                                         with_local_site=True)
 
         return self._create_update_review_request(
-            apiFunc, expected_status, review_request, self.local_site_name)
+            api_func, expected_status, review_request, self.local_site_name)
 
     def _test_put_with_text_type_all_fields(self, text_type):
         text = '`This` is a **test**'
@@ -565,7 +565,7 @@ class ResourceTests(ExtraDataListMixin, ExtraDataItemMixin,
         review_request = self.create_review_request(submitter=self.user,
                                                     publish=True)
 
-        rsp = self.apiPut(
+        rsp = self.api_put(
             get_review_request_draft_url(review_request),
             {
                 'text_type': text_type,
@@ -602,7 +602,7 @@ class ResourceTests(ExtraDataListMixin, ExtraDataItemMixin,
         draft.changedesc.text = text
         draft.changedesc.save()
 
-        rsp = self.apiPut(
+        rsp = self.api_put(
             get_review_request_draft_url(review_request),
             {
                 'text_type': text_type,
@@ -638,7 +638,7 @@ class ResourceTests(ExtraDataListMixin, ExtraDataItemMixin,
         draft.changedesc.text = text
         draft.changedesc.save()
 
-        rsp = self.apiPut(
+        rsp = self.api_put(
             get_review_request_draft_url(review_request),
             {
                 'text_type': text_type,
@@ -671,7 +671,7 @@ class ResourceTests(ExtraDataListMixin, ExtraDataItemMixin,
         else:
             local_site_name = None
 
-        rsp = self.apiPut(
+        rsp = self.api_put(
             get_review_request_draft_url(review_request, local_site_name),
             {
                 'description': 'New description',

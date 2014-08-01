@@ -1,6 +1,9 @@
 from __future__ import unicode_literals
 
+from django.http import SimpleCookie
 from django.utils import six
+from djblets.webapi.errors import NOT_LOGGED_IN
+
 
 from reviewboard.webapi.resources import resources
 from reviewboard.webapi.tests.base import BaseWebAPITestCase
@@ -38,8 +41,32 @@ class ResourceTests(BaseWebAPITestCase):
     def test_get_with_anonymous_user(self):
         """Testing the GET session/ API with anonymous user"""
         self.client.logout()
-        rsp = self.apiGet(get_session_url(),
-                          expected_mimetype=session_mimetype)
+        rsp = self.api_get(get_session_url(),
+                           expected_mimetype=session_mimetype)
         self.assertEqual(rsp['stat'], 'ok')
-        self.assertTrue('session' in rsp)
+        self.assertIn('session', rsp)
         self.assertFalse(rsp['session']['authenticated'])
+
+    #
+    # HTTP DELETE test
+    #
+
+    def setup_basic_delete_test(self, user, with_local_site, local_site_name):
+        return (get_session_url(local_site_name),
+                session_mimetype)
+
+    def check_delete_result(self, user, *args):
+        pass
+
+    def test_delete_not_owner(self):
+        """Testing the DELETE <URL> API when not logged in"""
+        self.load_fixtures(self.basic_delete_fixtures)
+
+        url, cb_args = self.setup_basic_delete_test(self.user, False, None)
+
+        self.client.logout()
+        self.client.cookies = SimpleCookie()
+
+        rsp = self.api_delete(url, expected_status=401)
+        self.assertEqual(rsp['stat'], 'fail')
+        self.assertEqual(rsp['err']['code'], NOT_LOGGED_IN.code)

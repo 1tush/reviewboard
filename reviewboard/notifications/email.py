@@ -24,7 +24,7 @@ def review_request_closed_cb(sender, user, review_request, **kwargs):
     """Sends e-mail when a review request is closed.
 
     Listens to the ``review_request_closed`` signal and sends an
-    email if this type of notification is enabled (through
+    e-mail if this type of notification is enabled (through
     ``mail_send_review_close_mail`` site configuration).
     """
     siteconfig = SiteConfiguration.objects.get_current()
@@ -36,7 +36,7 @@ def review_request_published_cb(sender, user, review_request, changedesc,
                                 **kwargs):
     """
     Listens to the ``review_request_published`` signal and sends an
-    email if this type of notification is enabled (through
+    e-mail if this type of notification is enabled (through
     ``mail_send_review_mail`` site configuration).
     """
     siteconfig = SiteConfiguration.objects.get_current()
@@ -46,7 +46,7 @@ def review_request_published_cb(sender, user, review_request, changedesc,
 
 def review_published_cb(sender, user, review, **kwargs):
     """
-    Listens to the ``review_published`` signal and sends an email if
+    Listens to the ``review_published`` signal and sends an e-mail if
     this type of notification is enabled (through
     ``mail_send_review_mail`` site configuration).
     """
@@ -57,7 +57,7 @@ def review_published_cb(sender, user, review, **kwargs):
 
 def reply_published_cb(sender, user, reply, **kwargs):
     """
-    Listens to the ``reply_published`` signal and sends an email if
+    Listens to the ``reply_published`` signal and sends an e-mail if
     this type of notification is enabled (through
     ``mail_send_review_mail`` site configuration).
     """
@@ -99,24 +99,30 @@ def get_email_address_for_user(u):
 
 
 def get_email_addresses_for_group(g):
+    addresses = []
+
     if g.mailing_list:
-        if g.mailing_list.find(",") == -1:
-            # The mailing list field has only one e-mail address in it,
-            # so we can just use that and the group's display name.
-            return ['"%s" <%s>' % (g.display_name, g.mailing_list)]
-        else:
+        if ',' in g.mailing_list:
             # The mailing list field has multiple e-mail addresses in it.
             # We don't know which one should have the group's display name
             # attached to it, so just return their custom list as-is.
-            return g.mailing_list.split(',')
-    else:
+            addresses = g.mailing_list.split(',')
+        else:
+            # The mailing list field has only one e-mail address in it,
+            # so we can just use that and the group's display name.
+            addresses = [u'"%s" <%s>' % (g.display_name, g.mailing_list)]
+
+    if not (g.mailing_list and g.email_list_only):
         local_site = g.local_site
         users = g.users.filter(Q(is_active=True) &
                                (Q(local_site=local_site) |
                                 Q(local_site_admins=local_site)))
 
-        return [get_email_address_for_user(u)
-                for u in users]
+        addresses.extend([get_email_address_for_user(u)
+                          for u in users
+                          if u.should_send_email()])
+
+    return addresses
 
 
 class SpiffyEmailMessage(EmailMultiAlternatives):
@@ -196,28 +202,30 @@ def send_review_mail(user, review_request, subject, in_reply_to,
             extra_recipients = User.objects.filter(
                 Q(username__in=extra_recipients) & local_site_q)
 
-    if from_email:
+    if from_email and user.should_send_email():
         recipients.add(from_email)
 
-    if review_request.submitter.is_active:
+    if (review_request.submitter.is_active and
+        review_request.submitter.should_send_email()):
         recipients.add(get_email_address_for_user(review_request.submitter))
 
     for u in target_people:
-        email_address = get_email_address_for_user(u)
-        recipients.add(email_address)
-        to_field.add(email_address)
+        if u.should_send_email():
+            email_address = get_email_address_for_user(u)
+            recipients.add(email_address)
+            to_field.add(email_address)
 
     for group in review_request.target_groups.all():
         for address in get_email_addresses_for_group(group):
             recipients.add(address)
 
     for profile in review_request.starred_by.all():
-        if profile.user.is_active:
+        if profile.user.is_active and profile.should_send_email:
             recipients.add(get_email_address_for_user(profile.user))
 
     if extra_recipients:
         for recipient in extra_recipients:
-            if recipient.is_active:
+            if recipient.is_active and recipient.should_send_email():
                 recipients.add(get_email_address_for_user(recipient))
 
     siteconfig = current_site.config.get()
@@ -294,11 +302,11 @@ def mail_review_request(review_request, changedesc=None, on_close=False):
     the template to add contextual (updated) flags to inform people what
     changed.
 
-    The "on_close" argument indicates whether review request emails should
+    The "on_close" argument indicates whether review request e-mails should
     be sent on closing (SUBMITTED,DISCARDED) review requests.
     """
     # If the review request is not yet public or has been discarded, don't send
-    # any mail. Relax the "discarded" rule when emails are sent on closing
+    # any mail. Relax the "discarded" rule when e-mails are sent on closing
     # review requests
     if (   not review_request.public
         or (not on_close and review_request.status == 'D')):

@@ -26,7 +26,21 @@ class UploadFileForm(forms.Form):
 
     def create(self, file, review_request, filediff=None):
         caption = self.cleaned_data['caption'] or file.name
-        mimetype = file.content_type or self._guess_mimetype(file)
+
+        # There are several things that can go wrong with browser-provided
+        # mimetypes. In one case (bug 3427), Firefox on Linux Mint was
+        # providing a mimetype that looked like 'text/text/application/pdf',
+        # which is unparseable. IE also has a habit of setting any unknown file
+        # type to 'application/octet-stream', rather than just choosing not to
+        # provide a mimetype. In the case where what we get from the browser
+        # is obviously wrong, try to guess.
+        if (file.content_type and
+            len(file.content_type.split('/')) == 2 and
+            file.content_type != 'application/octet-stream'):
+            mimetype = file.content_type
+        else:
+            mimetype = self._guess_mimetype(file)
+
         filename = '%s__%s' % (uuid4(), file.name)
 
         attachment_kwargs = {
@@ -86,6 +100,9 @@ class UploadFileForm(forms.Form):
 
         if ret == 0:
             mimetype = p.stdout.read().strip()
+
+        # Reset the read position so we can properly save this.
+        file.seek(0)
 
         return mimetype or self.DEFAULT_MIMETYPE
 

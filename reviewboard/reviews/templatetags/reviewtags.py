@@ -14,7 +14,7 @@ from django.utils.translation import ugettext_lazy as _
 from djblets.util.decorators import basictag, blocktag
 from djblets.util.humanize import humanize_list
 
-from reviewboard.accounts.models import Profile
+from reviewboard.accounts.models import Profile, Trophy
 from reviewboard.reviews.fields import (get_review_request_fieldset,
                                         get_review_request_fieldsets)
 from reviewboard.reviews.markdown_utils import markdown_escape
@@ -24,6 +24,34 @@ from reviewboard.reviews.models import (BaseComment, Group,
 
 
 register = template.Library()
+
+
+@register.tag
+@basictag(takes_context=False)
+def display_review_request_trophies(review_request):
+    """Returns the HTML for the trophies awarded to a review request."""
+    trophy_models = Trophy.objects.get_trophies(review_request)
+
+    if not trophy_models:
+        return ''
+
+    trophies = []
+    for trophy_model in trophy_models:
+        try:
+            trophy_type_cls = trophy_model.trophy_type
+            trophy_type = trophy_type_cls()
+            trophies.append({
+                'image_url': trophy_type.image_url,
+                'image_width': trophy_type.image_width,
+                'image_height': trophy_type.image_height,
+                'text': trophy_type.get_display_text(trophy_model),
+            })
+        except Exception as e:
+            logging.error('Error when rendering trophy %r (%r): %s',
+                          trophy_model.pk, trophy_type_cls, e,
+                          exc_info=1)
+
+    return render_to_string('reviews/trophy_box.html', {'trophies': trophies})
 
 
 @register.tag
@@ -82,16 +110,16 @@ def file_attachment_comments(context, file_attachment):
                 'comment_id': comment.id,
                 'text': escape(comment.text),
                 'user': {
-                    'username': review.user.username,
-                    'name': (review.user.get_full_name() or
-                             review.user.username),
+                    'username': escape(review.user.username),
+                    'name': escape(review.user.get_full_name() or
+                                   review.user.username),
                 },
                 'url': comment.get_review_url(),
                 'localdraft': review.user == user and not review.public,
                 'review_id': review.id,
                 'issue_opened': comment.issue_opened,
-                'issue_status': BaseComment.issue_status_to_string(
-                    comment.issue_status),
+                'issue_status': escape(
+                    BaseComment.issue_status_to_string(comment.issue_status)),
             })
 
     return json.dumps(comments)
@@ -287,13 +315,22 @@ def for_review_request_field(context, nodelist, review_request_details,
         fieldset = get_review_request_fieldset(fieldset)
 
     for field_cls in fieldset.field_classes:
-        field = field_cls(review_request_details)
+        try:
+            field = field_cls(review_request_details)
+        except Exception as e:
+            logging.error('Error instantiating ReviewRequestFieldset %r: %s',
+                          field_cls, e, exc_info=1)
 
-        if field.should_render(field.value):
-            context.push()
-            context['field'] = field
-            s.append(nodelist.render(context))
-            context.pop()
+        try:
+            if field.should_render(field.value):
+                context.push()
+                context['field'] = field
+                s.append(nodelist.render(context))
+                context.pop()
+        except Exception as e:
+            logging.error('Error running should_render for '
+                          'ReviewRequestFieldset %r: %s', field_cls, e,
+                          exc_info=1)
 
     return ''.join(s)
 
@@ -313,26 +350,45 @@ def for_review_request_fieldset(context, nodelist, review_request_details):
     fieldset_classes = get_review_request_fieldsets(include_main=False)
 
     for fieldset_cls in fieldset_classes:
-        if not fieldset_cls.is_empty():
-            fieldset = fieldset_cls(review_request_details)
+        try:
+            if not fieldset_cls.is_empty():
+                try:
+                    fieldset = fieldset_cls(review_request_details)
+                except Exception as e:
+                    logging.error('Error instantiating ReviewRequestFieldset '
+                                  '%r: %s', fieldset_cls, e, exc_info=1)
 
-            context.push()
-            context.update({
-                'fieldset': fieldset,
-                'show_fieldset_required': (
-                    fieldset.show_required and
-                    review_request.status == ReviewRequest.PENDING_REVIEW and
-                    review_request.is_mutable_by(user)),
-                'forloop': {
-                    'first': is_first,
-                }
-            })
-            s.append(nodelist.render(context))
-            context.pop()
+                context.push()
+                context.update({
+                    'fieldset': fieldset,
+                    'show_fieldset_required': (
+                        fieldset.show_required and
+                        review_request.status == ReviewRequest.PENDING_REVIEW and
+                        review_request.is_mutable_by(user)),
+                    'forloop': {
+                        'first': is_first,
+                        }
+                })
+                s.append(nodelist.render(context))
+                context.pop()
 
-            is_first = False
+                is_first = False
+        except Exception as e:
+            logging.error('Error running is_empty for ReviewRequestFieldset '
+                          '%r: %s', fieldset_cls, e, exc_info=1)
 
     return ''.join(s)
+
+
+@register.assignment_tag
+def has_usable_review_ui(user, review_request, file_attachment):
+    """Returns whether a review UI is set and can be used."""
+    review_ui = file_attachment.review_ui
+
+    return (review_ui and
+            review_ui.is_enabled_for(user=user,
+                                     review_request=review_request,
+                                     file_attachment=file_attachment))
 
 
 @register.filter

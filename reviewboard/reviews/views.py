@@ -8,16 +8,20 @@ from django.contrib.auth.decorators import login_required
 from django.contrib.auth.models import User
 from django.contrib.sites.models import Site
 from django.core.exceptions import MultipleObjectsReturned, ObjectDoesNotExist
-from django.core.urlresolvers import reverse
 from django.db.models import Q
-from django.http import (HttpResponse, HttpResponseRedirect, Http404,
-                         HttpResponseNotModified, HttpResponseServerError)
+from django.http import (Http404,
+                         HttpResponse,
+                         HttpResponseNotFound,
+                         HttpResponseNotModified,
+                         HttpResponseRedirect,
+                         HttpResponseServerError)
 from django.shortcuts import (get_object_or_404, get_list_or_404, render,
                               render_to_response)
 from django.template.context import RequestContext
 from django.template.loader import render_to_string
 from django.utils import six, timezone
 from django.utils.decorators import method_decorator
+from django.utils.html import escape
 from django.utils.http import http_date
 from django.utils.safestring import mark_safe
 from django.utils.timezone import utc
@@ -42,6 +46,7 @@ from reviewboard.diffviewer.diffutils import (convert_to_unicode,
 from reviewboard.diffviewer.models import DiffSet
 from reviewboard.diffviewer.views import (DiffFragmentView, DiffViewerView,
                                           exception_traceback_string)
+from reviewboard.hostingsvcs.bugtracker import BugTracker
 from reviewboard.reviews.ui.screenshot import LegacyScreenshotReviewUI
 from reviewboard.reviews.context import (comment_counts,
                                          diffsets_with_comments,
@@ -53,7 +58,6 @@ from reviewboard.reviews.models import (BaseComment, Comment,
                                         FileAttachmentComment,
                                         ReviewRequest, Review,
                                         Screenshot, ScreenshotComment)
-from reviewboard.scmtools.core import PRE_CREATION
 from reviewboard.scmtools.models import Repository
 from reviewboard.site.decorators import check_local_site_access
 from reviewboard.site.urlresolvers import local_site_reverse
@@ -377,11 +381,20 @@ def review_detail(request,
         # If the review request is public and pending review and if the user
         # is logged in, mark that they've visited this review request.
         if review_request.public and review_request.status == "P":
-            visited, visited_is_new = ReviewRequestVisit.objects.get_or_create(
-                user=request.user, review_request=review_request)
-            last_visited = visited.timestamp.replace(tzinfo=utc)
-            visited.timestamp = timezone.now()
-            visited.save()
+            try:
+                visited, visited_is_new = \
+                    ReviewRequestVisit.objects.get_or_create(
+                        user=request.user, review_request=review_request)
+                last_visited = visited.timestamp.replace(tzinfo=utc)
+                visited.timestamp = timezone.now()
+                visited.save()
+            except ReviewRequestVisit.DoesNotExist:
+                # Somehow, this visit was seen as created but then not
+                # accessible. We need to log this and then continue on.
+                logging.error('Unable to get or create ReviewRequestVisit '
+                              'for user "%s" on review request at %s',
+                              request.user.username,
+                              review_request.get_absolute_url())
 
         try:
             profile = request.user.get_profile()
@@ -430,10 +443,8 @@ def review_detail(request,
 
     if changedescs:
         # We sort from newest to oldest, so the latest one is the first.
-        latest_changedesc = changedescs[0]
-        latest_timestamp = latest_changedesc.timestamp
+        latest_timestamp = changedescs[0].timestamp
     else:
-        latest_changedesc = None
         latest_timestamp = None
 
     # Now that we have the list of public reviews and all that metadata,
@@ -681,15 +692,8 @@ def review_detail(request,
 
     entries.sort(key=lambda item: item['timestamp'])
 
-    close_description = ''
-    close_description_rich_text = False
-
-    if latest_changedesc and 'status' in latest_changedesc.fields_changed:
-        status = latest_changedesc.fields_changed['status']['new'][0]
-
-        if status in (ReviewRequest.DISCARDED, ReviewRequest.SUBMITTED):
-            close_description = latest_changedesc.text
-            close_description_rich_text = latest_changedesc.rich_text
+    close_description, close_description_rich_text = \
+        review_request.get_close_description()
 
     context_data = make_review_request_context(request, review_request, {
         'blocks': blocks,
@@ -699,10 +703,8 @@ def review_detail(request,
         'last_activity_time': last_activity_time,
         'review': pending_review,
         'request': request,
-        'latest_changedesc': latest_changedesc,
         'close_description': close_description,
         'close_description_rich_text': close_description_rich_text,
-        'PRE_CREATION': PRE_CREATION,
         'issues': issues,
         'has_diffs': (draft and draft.diffset) or len(diffsets) > 0,
         'file_attachments': [file_attachment
@@ -813,12 +815,6 @@ class ReviewsDiffViewerView(DiffViewerView):
         file_attachments = list(self.review_request.get_file_attachments())
         screenshots = list(self.review_request.get_screenshots())
 
-        try:
-            latest_changedesc = \
-                self.review_request.changedescs.filter(public=True).latest()
-        except ChangeDescription.DoesNotExist:
-            latest_changedesc = None
-
         # Compute the lists of comments based on filediffs and interfilediffs.
         # We do this using the 'through' table so that we can select_related
         # the reviews and comments.
@@ -833,15 +829,8 @@ class ReviewsDiffViewerView(DiffViewerView):
             key = (comment.filediff_id, comment.interfilediff_id)
             comments.setdefault(key, []).append(comment)
 
-        close_description = ''
-        close_description_rich_text = False
-
-        if latest_changedesc and 'status' in latest_changedesc.fields_changed:
-            status = latest_changedesc.fields_changed['status']['new'][0]
-
-            if status in (ReviewRequest.DISCARDED, ReviewRequest.SUBMITTED):
-                close_description = latest_changedesc.text
-                close_description_rich_text = latest_changedesc.rich_text
+        close_description, close_description_rich_text = \
+            self.review_request.get_close_description()
 
         context = super(ReviewsDiffViewerView, self).get_context_data(
             *args, **kwargs)
@@ -963,7 +952,7 @@ def raw_diff(request, review_request_id, revision=None, local_site=None):
     else:
         filename = six.text_type(diffset.name).encode('ascii', 'ignore')
 
-    resp['Content-Disposition'] = 'inline; filename=%s' % filename
+    resp['Content-Disposition'] = 'attachment; filename=%s' % filename
     set_last_modified(resp, diffset.timestamp)
 
     return resp
@@ -1209,17 +1198,23 @@ class ReviewsDiffFragmentView(DiffFragmentView):
                 modified_revision = diffset.revision
                 modified_filediff_id = filediff.pk
 
-            download_orig_url = reverse(orig_url_name, kwargs={
-                'review_request_id': self.review_request.display_id,
-                'revision': diffset.revision,
-                'filediff_id': filediff.pk,
-            })
+            download_orig_url = local_site_reverse(
+                orig_url_name,
+                request=self.request,
+                kwargs={
+                    'review_request_id': self.review_request.display_id,
+                    'revision': diffset.revision,
+                    'filediff_id': filediff.pk,
+                })
 
-            download_modified_url = reverse('download-modified-file', kwargs={
-                'review_request_id': self.review_request.display_id,
-                'revision': modified_revision,
-                'filediff_id': modified_filediff_id,
-            })
+            download_modified_url = local_site_reverse(
+                'download-modified-file',
+                request=self.request,
+                kwargs={
+                    'review_request_id': self.review_request.display_id,
+                    'revision': modified_revision,
+                    'filediff_id': modified_filediff_id,
+                })
 
         return {
             'download_orig_url': download_orig_url,
@@ -1439,7 +1434,9 @@ def review_file_attachment(request, review_request_id, file_attachment_id,
     file_attachment = get_object_or_404(FileAttachment, pk=file_attachment_id)
     review_ui = file_attachment.review_ui
 
-    if review_ui:
+    if review_ui and review_ui.is_enabled_for(user=request.user,
+                                              review_request=review_request,
+                                              file_attachment=file_attachment):
         return review_ui.render_to_response(request)
     else:
         raise Http404
@@ -1506,7 +1503,9 @@ class ReviewRequestSearchView(SearchView):
 
     def create_response(self):
         if not self.query:
-            return HttpResponseRedirect(reverse("all-review-requests"))
+            return HttpResponseRedirect(
+                local_site_reverse('all-review-requests',
+                                   request=self.request))
 
         if self.query.isdigit() and self.results:
             return HttpResponseRedirect(
@@ -1556,6 +1555,66 @@ def user_infobox(request, username,
     set_etag(response, etag)
 
     return response
+
+
+def bug_url(request, review_request_id, bug_id, local_site=None):
+    """Redirects user to bug tracker issue page."""
+    review_request, response = \
+        _find_review_request(request, review_request_id, local_site)
+
+    if not review_request:
+        return response
+
+    return HttpResponseRedirect(review_request.repository.bug_tracker % bug_id)
+
+
+def bug_infobox(request, review_request_id, bug_id,
+                template_name='reviews/bug_infobox.html',
+                local_site=None):
+    """Displays a bug info popup.
+
+    This is meant to be embedded in other pages, rather than being
+    a standalone page.
+    """
+    review_request, response = \
+        _find_review_request(request, review_request_id, local_site)
+
+    if not review_request:
+        return response
+
+    repository = review_request.repository
+
+    bug_tracker = repository.bug_tracker_service
+    if not bug_tracker:
+        return HttpResponseNotFound(_('Unable to find bug tracker service'))
+
+    if not isinstance(bug_tracker, BugTracker):
+        return HttpResponseNotFound(
+            _('Bug tracker %s does not support metadata') % bug_tracker.name)
+
+    bug_info = bug_tracker.get_bug_info(repository, bug_id)
+    bug_description = bug_info['description']
+    bug_summary = bug_info['summary']
+    bug_status = bug_info['status']
+
+    if not bug_summary and not bug_description:
+        return HttpResponseNotFound(
+            _('No bug metadata found for bug %(bug_id)s on bug tracker '
+              '%(bug_tracker)s') % {
+                'bug_id': bug_id,
+                'bug_tracker': bug_tracker.name,
+            })
+
+    # Don't do anything for single newlines, but treat two newlines as a
+    # paragraph break.
+    escaped_description = escape(bug_description).replace('\n\n', '<br/><br/>')
+
+    return render_to_response(template_name, RequestContext(request, {
+        'bug_id': bug_id,
+        'bug_description': mark_safe(escaped_description),
+        'bug_status': bug_status,
+        'bug_summary': bug_summary
+    }))
 
 
 def _download_diff_file(modified, request, review_request_id, revision,

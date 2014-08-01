@@ -5,7 +5,6 @@ from django.utils import six
 from djblets.testing.decorators import add_fixtures
 from djblets.webapi.errors import PERMISSION_DENIED
 
-from reviewboard.site.models import LocalSite
 from reviewboard.webapi.resources import resources
 from reviewboard.webapi.errors import INVALID_USER
 from reviewboard.webapi.tests.base import BaseWebAPITestCase
@@ -56,8 +55,8 @@ class ResourceListTests(BaseWebAPITestCase):
         without access to invite-only group
         """
         group = self.create_review_group(name='priv-group', invite_only=True)
-        rsp = self.apiGet(get_review_group_user_list_url(group.name),
-                          expected_status=403)
+        rsp = self.api_get(get_review_group_user_list_url(group.name),
+                           expected_status=403)
         self.assertEqual(rsp['stat'], 'fail')
         self.assertEqual(rsp['err']['code'], PERMISSION_DENIED.code)
 
@@ -92,7 +91,7 @@ class ResourceListTests(BaseWebAPITestCase):
         group = self.create_review_group()
         user = User.objects.get(pk=1)
 
-        rsp = self.apiPost(
+        rsp = self.api_post(
             get_review_group_user_list_url(group.name, local_site),
             {'username': user.username},
             expected_status=403)
@@ -104,7 +103,7 @@ class ResourceListTests(BaseWebAPITestCase):
 
         group = self.create_review_group()
 
-        rsp = self.apiPost(
+        rsp = self.api_post(
             get_review_group_user_list_url(group.name),
             {'username': 'grabl'},
             expected_status=400)
@@ -121,7 +120,7 @@ class ResourceListTests(BaseWebAPITestCase):
 
         self.assertFalse(self.user.is_superuser)
 
-        rsp = self.apiPost(
+        rsp = self.api_post(
             get_review_group_user_list_url(group.name),
             {'username': self.user.username},
             expected_mimetype=user_item_mimetype)
@@ -136,7 +135,7 @@ class ResourceListTests(BaseWebAPITestCase):
         group = self.create_review_group(invite_only=True)
         self.assertFalse(group.is_accessible_by(self.user))
 
-        rsp = self.apiPost(
+        rsp = self.api_post(
             get_review_group_user_list_url(group.name),
             {'username': self.user.username},
             expected_status=403)
@@ -151,14 +150,14 @@ class ResourceListTests(BaseWebAPITestCase):
         """
         self.assertFalse(self.user.is_superuser)
 
-        local_site = LocalSite.objects.get(name=self.local_site_name)
+        local_site = self.get_local_site(name=self.local_site_name)
         local_site.users.add(self.user)
 
         group = self.create_review_group(with_local_site=True)
 
         self.assertEqual(group.users.count(), 0)
 
-        rsp = self.apiPost(
+        rsp = self.api_post(
             get_review_group_user_list_url(group.name, self.local_site_name),
             {'username': self.user.username},
             expected_mimetype=user_item_mimetype)
@@ -177,7 +176,7 @@ class ResourceListTests(BaseWebAPITestCase):
 
         self.assertEqual(group.users.count(), 0)
 
-        rsp = self.apiPost(
+        rsp = self.api_post(
             get_review_group_user_list_url(group.name, self.local_site_name),
             {'username': self.user.username},
             expected_status=403)
@@ -229,7 +228,7 @@ class ResourceItemTests(BaseWebAPITestCase):
 
         self.assertFalse(self.user.is_superuser)
 
-        self.apiDelete(
+        self.api_delete(
             get_review_group_user_item_url(group.name, self.user.username))
 
         self.assertEqual(group.users.count(), 0)
@@ -241,7 +240,7 @@ class ResourceItemTests(BaseWebAPITestCase):
         """
         self.assertFalse(self.user.is_superuser)
 
-        local_site = LocalSite.objects.get(name=self.local_site_name)
+        local_site = self.get_local_site(name=self.local_site_name)
         local_site.users.add(self.user)
 
         group = self.create_review_group(with_local_site=True)
@@ -249,7 +248,7 @@ class ResourceItemTests(BaseWebAPITestCase):
 
         self.assertEqual(group.users.count(), 1)
 
-        self.apiDelete(
+        self.api_delete(
             get_review_group_user_item_url(group.name, self.user.username,
                                            self.local_site_name))
 

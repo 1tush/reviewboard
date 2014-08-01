@@ -8,6 +8,7 @@ from socket import error as SocketError
 from tempfile import mkdtemp
 
 from django import forms
+from django.conf import settings
 from django.contrib.auth.models import AnonymousUser, User
 from django.core.cache import cache
 from django.utils import six
@@ -35,6 +36,7 @@ from reviewboard.scmtools.perforce import STunnelProxy, STUNNEL_SERVER
 from reviewboard.scmtools.signals import (checked_file_exists,
                                           checking_file_exists,
                                           fetched_file, fetching_file)
+from reviewboard.scmtools.svn import recompute_svn_backend
 from reviewboard.site.models import LocalSite
 from reviewboard.ssh.client import SSHClient
 from reviewboard.ssh.tests import SSHTestCase
@@ -161,9 +163,10 @@ class RepositoryTests(TestCase):
 
         self.local_repo_path = os.path.join(os.path.dirname(__file__),
                                             'testdata', 'git_repo')
-        self.repository = Repository(name='Git test repo',
-                                     path=self.local_repo_path,
-                                     tool=Tool.objects.get(name='Git'))
+        self.repository = Repository.objects.create(
+            name='Git test repo',
+            path=self.local_repo_path,
+            tool=Tool.objects.get(name='Git'))
 
         self.scmtool_cls = self.repository.get_scmtool().__class__
         self.old_get_file = self.scmtool_cls.get_file
@@ -176,6 +179,36 @@ class RepositoryTests(TestCase):
 
         self.scmtool_cls.get_file = self.old_get_file
         self.scmtool_cls.file_exists = self.old_file_exists
+
+    def test_archive(self):
+        """Testing Repository.archive"""
+        self.repository.archive()
+        self.assertTrue(self.repository.name.startswith('ar:Git test repo:'))
+        self.assertTrue(self.repository.archived)
+        self.assertFalse(self.repository.public)
+        self.assertIsNotNone(self.repository.archived_timestamp)
+
+        repository = Repository.objects.get(pk=self.repository.pk)
+        self.assertEqual(repository.name, self.repository.name)
+        self.assertEqual(repository.archived, self.repository.archived)
+        self.assertEqual(repository.public, self.repository.public)
+        self.assertEqual(repository.archived_timestamp,
+                         self.repository.archived_timestamp)
+
+    def test_archive_no_save(self):
+        """Testing Repository.archive with save=False"""
+        self.repository.archive(save=False)
+        self.assertTrue(self.repository.name.startswith('ar:Git test repo:'))
+        self.assertTrue(self.repository.archived)
+        self.assertFalse(self.repository.public)
+        self.assertIsNotNone(self.repository.archived_timestamp)
+
+        repository = Repository.objects.get(pk=self.repository.pk)
+        self.assertNotEqual(repository.name, self.repository.name)
+        self.assertNotEqual(repository.archived, self.repository.archived)
+        self.assertNotEqual(repository.public, self.repository.public)
+        self.assertNotEqual(repository.archived_timestamp,
+                            self.repository.archived_timestamp)
 
     def test_get_file_caching(self):
         """Testing Repository.get_file caches result"""
@@ -393,29 +426,81 @@ class CVSTests(SCMTestCase):
         except ImportError:
             raise nose.SkipTest('cvs binary not found')
 
-    def test_path_with_port(self):
-        """Testing parsing a CVSROOT with a port"""
-        repo = Repository(name="CVS",
-                          path="example.com:123/cvsroot/test",
-                          username="anonymous",
-                          tool=Tool.objects.get(name="CVS"))
-        tool = repo.get_scmtool()
-
-        self.assertEqual(tool.repopath, "/cvsroot/test")
-        self.assertEqual(tool.client.cvsroot,
-                         ":pserver:anonymous@example.com:123/cvsroot/test")
+    def test_build_cvsroot_with_port(self):
+        """Testing CVSTool.build_cvsroot with a port"""
+        self._test_build_cvsroot(
+            repo_path='example.com:123/cvsroot/test',
+            username='anonymous',
+            expected_cvsroot=':pserver:anonymous@example.com:123/cvsroot/test',
+            expected_path='/cvsroot/test')
 
     def test_path_without_port(self):
-        """Testing parsing a CVSROOT without a port"""
-        repo = Repository(name="CVS",
-                          path="example.com:/cvsroot/test",
-                          username="anonymous",
-                          tool=Tool.objects.get(name="CVS"))
-        tool = repo.get_scmtool()
+        """Testing CVSTool.build_cvsroot without a port"""
+        self._test_build_cvsroot(
+            repo_path='example.com:/cvsroot/test',
+            username='anonymous',
+            expected_cvsroot=':pserver:anonymous@example.com:/cvsroot/test',
+            expected_path='/cvsroot/test')
 
-        self.assertEqual(tool.repopath, "/cvsroot/test")
-        self.assertEqual(tool.client.cvsroot,
-                         ":pserver:anonymous@example.com:/cvsroot/test")
+    def test_path_with_pserver_and_no_user_or_password(self):
+        """Testing CVSTool.build_cvsroot with :pserver: and no user or
+        password
+        """
+        self._test_build_cvsroot(
+            repo_path=':pserver:example.com:/cvsroot/test',
+            expected_cvsroot=':pserver:example.com:/cvsroot/test',
+            expected_path='/cvsroot/test')
+
+    def test_path_with_pserver_and_inline_user(self):
+        """Testing CVSTool.build_cvsroot with :pserver: and inline user"""
+        self._test_build_cvsroot(
+            repo_path=':pserver:anonymous@example.com:/cvsroot/test',
+            expected_cvsroot=':pserver:anonymous@example.com:/cvsroot/test',
+            expected_path='/cvsroot/test')
+
+    def test_path_with_pserver_and_inline_user_and_password(self):
+        """Testing CVSTool.build_cvsroot with :pserver: and inline user and
+        password
+        """
+        self._test_build_cvsroot(
+            repo_path=':pserver:anonymous:pass@example.com:/cvsroot/test',
+            expected_cvsroot=':pserver:anonymous:pass@example.com:'
+                             '/cvsroot/test',
+            expected_path='/cvsroot/test')
+
+    def test_path_with_pserver_and_form_user(self):
+        """Testing CVSTool.build_cvsroot with :pserver: and form-provided
+        user
+        """
+        self._test_build_cvsroot(
+            repo_path=':pserver:example.com:/cvsroot/test',
+            username='anonymous',
+            expected_cvsroot=':pserver:anonymous@example.com:/cvsroot/test',
+            expected_path='/cvsroot/test')
+
+    def test_path_with_pserver_and_form_user_and_password(self):
+        """Testing CVSTool.build_cvsroot with :pserver: and form-provided
+        user and password
+        """
+        self._test_build_cvsroot(
+            repo_path=':pserver:example.com:/cvsroot/test',
+            username='anonymous',
+            password='pass',
+            expected_cvsroot=':pserver:anonymous:pass@example.com:'
+                             '/cvsroot/test',
+            expected_path='/cvsroot/test')
+
+    def test_path_with_pserver_and_inline_takes_precedence(self):
+        """Testing CVSTool.build_cvsroot with :pserver: and inline user/password
+        taking precedence
+        """
+        self._test_build_cvsroot(
+            repo_path=':pserver:anonymous:pass@example.com:/cvsroot/test',
+            username='grumpy',
+            password='grr',
+            expected_cvsroot=':pserver:anonymous:pass@example.com:'
+                             '/cvsroot/test',
+            expected_path='/cvsroot/test')
 
     def test_get_file(self):
         """Testing CVSTool.get_file"""
@@ -447,7 +532,7 @@ class CVSTests(SCMTestCase):
                           lambda: self.tool.get_file('hello', PRE_CREATION))
 
     def test_revision_parsing(self):
-        """Testing revision number parsing"""
+        """Testing CVSTool revision number parsing"""
         self.assertEqual(self.tool.parse_diff_revision('', 'PRE-CREATION')[1],
                          PRE_CREATION)
         self.assertEqual(
@@ -614,7 +699,7 @@ class CVSTests(SCMTestCase):
         self.assertEqual(file.delete_count, 1)
 
     def test_bad_root(self):
-        """Testing a bad CVSROOT"""
+        """Testing CVSTool with a bad CVSROOT"""
         file = 'test/testfile'
         rev = Revision('1.1')
         badrepo = Repository(name='CVS',
@@ -632,13 +717,31 @@ class CVSTests(SCMTestCase):
         """Testing a SSH-backed CVS repository with a LocalSite"""
         self._test_ssh_with_site(self.cvs_ssh_path, 'CVSROOT/modules')
 
+    def _test_build_cvsroot(self, repo_path, expected_cvsroot, expected_path,
+                            username=None, password=None):
+        cvsroot, norm_path = self.tool.build_cvsroot(repo_path, username,
+                                                     password)
 
-class SubversionTests(SCMTestCase):
-    """Unit tests for subversion."""
+        self.assertEqual(cvsroot, expected_cvsroot)
+        self.assertEqual(norm_path, expected_path)
+
+
+class CommonSVNTestsBase(SCMTestCase):
+    """Common unit tests for Subversion.
+
+    This is meant to be subclassed for each backend that wants to run
+    the common set of tests.
+    """
+    backend = None
+    backend_name = None
     fixtures = ['test_scmtools']
 
     def setUp(self):
-        super(SubversionTests, self).setUp()
+        super(CommonSVNTestsBase, self).setUp()
+
+        self._old_backend_setting = settings.SVNTOOL_BACKENDS
+        settings.SVNTOOL_BACKENDS = [self.backend]
+        recompute_svn_backend()
 
         self.svn_repo_path = os.path.join(os.path.dirname(__file__),
                                           'testdata/svn_repo')
@@ -651,19 +754,37 @@ class SubversionTests(SCMTestCase):
         try:
             self.tool = self.repository.get_scmtool()
         except ImportError:
-            raise nose.SkipTest('Neither pysvn nor subvertpy is installed')
+            raise nose.SkipTest('The %s backend could not be used. A '
+                                'dependency may be missing.'
+                                % self.backend)
+
+        assert self.tool.client.__class__.__module__ == self.backend
+
+    def tearDown(self):
+        super(CommonSVNTestsBase, self).tearDown()
+
+        settings.SVNTOOL_BACKENDS = self._old_backend_setting
+        recompute_svn_backend()
+
+    def shortDescription(self):
+        desc = super(CommonSVNTestsBase, self).shortDescription()
+        desc = desc.replace('<backend>', self.backend_name)
+
+        return desc
 
     def test_ssh(self):
-        """Testing a SSH-backed Subversion repository"""
+        """Testing SVN (<backend>) with a SSH-backed Subversion repository"""
         self._test_ssh(self.svn_ssh_path, 'trunk/doc/misc-docs/Makefile')
 
     def test_ssh_with_site(self):
-        """Testing a SSH-backed Subversion repository with a LocalSite"""
+        """Testing SVN (<backend>) with a SSH-backed Subversion repository
+        with a LocalSite
+        """
         self._test_ssh_with_site(self.svn_ssh_path,
                                  'trunk/doc/misc-docs/Makefile')
 
     def test_get_file(self):
-        """Testing SVNTool.get_file"""
+        """Testing SVN (<backend>) get_file"""
         expected = (b'include ../tools/Makefile.base-vars\n'
                     b'NAME = misc-docs\n'
                     b'OUTNAME = svn-misc-docs\n'
@@ -695,7 +816,7 @@ class SubversionTests(SCMTestCase):
                           lambda: self.tool.get_file('hello', PRE_CREATION))
 
     def test_revision_parsing(self):
-        """Testing revision number parsing"""
+        """Testing SVN (<backend>) revision number parsing"""
         self.assertEqual(
             self.tool.parse_diff_revision('', '(working copy)')[1],
             HEAD)
@@ -733,7 +854,7 @@ class SubversionTests(SCMTestCase):
                          '7')
 
     def test_interface(self):
-        """Testing basic SVNTool API"""
+        """Testing SVN (<backend>) with basic SVNTool API"""
         self.assertEqual(self.tool.get_diffs_use_absolute_paths(), False)
 
         self.assertRaises(NotImplementedError,
@@ -743,7 +864,7 @@ class SubversionTests(SCMTestCase):
                           lambda: self.tool.get_pending_changesets(1))
 
     def test_binary_diff(self):
-        """Testing parsing SVN diff with binary file"""
+        """Testing SVN (<backend>) parsing SVN diff with binary file"""
         diff = (b'Index: binfile\n'
                 b'============================================================'
                 b'=======\n'
@@ -755,7 +876,7 @@ class SubversionTests(SCMTestCase):
         self.assertEqual(file.binary, True)
 
     def test_keyword_diff(self):
-        """Testing parsing SVN diff with keywords"""
+        """Testing SVN (<backend>) parsing diff with keywords"""
         # 'svn cat' will expand special variables in svn:keywords,
         # but 'svn diff' doesn't expand anything.  This causes the
         # patch to fail if those variables appear in the patch context.
@@ -779,7 +900,7 @@ class SubversionTests(SCMTestCase):
         patch(diff, file, filename)
 
     def test_unterminated_keyword_diff(self):
-        """Testing parsing SVN diff with unterminated keywords"""
+        """Testing SVN (<backend>) parsing diff with unterminated keywords"""
         diff = (b"Index: Makefile\n"
                 b"==========================================================="
                 b"========\n"
@@ -801,7 +922,9 @@ class SubversionTests(SCMTestCase):
         patch(diff, file, filename)
 
     def test_svn16_property_diff(self):
-        """Testing parsing SVN 1.6 diff with property changes"""
+        """Testing SVN (<backend>) parsing SVN 1.6 diff with
+        property changes
+        """
         prop_diff = (
             b"Index:\n"
             b"======================================================"
@@ -830,7 +953,9 @@ class SubversionTests(SCMTestCase):
         self.assertEqual(files[0].delete_count, 0)
 
     def test_svn17_property_diff(self):
-        """Testing parsing SVN 1.7+ diff with property changes"""
+        """Testing SVN (<backend>) parsing SVN 1.7+ diff with
+        property changes
+        """
         prop_diff = (
             b"Index .:\n"
             b"======================================================"
@@ -864,7 +989,7 @@ class SubversionTests(SCMTestCase):
         self.assertEqual(files[0].delete_count, 0)
 
     def test_unicode_diff(self):
-        """Testing parsing SVN diff with unicode characters"""
+        """Testing SVN (<backend>) parsing diff with unicode characters"""
         diff = ("Index: Filé\n"
                 "==========================================================="
                 "========\n"
@@ -884,7 +1009,7 @@ class SubversionTests(SCMTestCase):
         self.assertEqual(files[0].delete_count, 0)
 
     def test_diff_with_spaces_in_filenames(self):
-        """Testing parsing SVN diff with spaces in filenames"""
+        """Testing SVN (<backend>) parsing diff with spaces in filenames"""
         diff = (b"Index: File with spaces\n"
                 b"==========================================================="
                 b"========\n"
@@ -903,17 +1028,58 @@ class SubversionTests(SCMTestCase):
         self.assertEqual(files[0].insert_count, 1)
         self.assertEqual(files[0].delete_count, 0)
 
+    def test_diff_with_added_empty_file(self):
+        """Testing parsing SVN diff with added empty file"""
+        diff = (b'Index: empty-file\t(added)\n'
+                b'==========================================================='
+                b'========\n'
+                b'--- empty-file\t(revision 0)\n'
+                b'+++ empty-file\t(revision 0)\n')
+
+        files = self.tool.get_parser(diff).parse()
+        self.assertEqual(len(files), 1)
+        self.assertEqual(files[0].origFile, 'empty-file')
+        self.assertEqual(files[0].newFile, 'empty-file')
+        self.assertEqual(files[0].origInfo, '(revision 0)')
+        self.assertEqual(files[0].newInfo, '(revision 0)')
+        self.assertFalse(files[0].binary)
+        self.assertFalse(files[0].deleted)
+        self.assertEqual(files[0].insert_count, 0)
+        self.assertEqual(files[0].delete_count, 0)
+
+    def test_diff_with_deleted_empty_file(self):
+        """Testing parsing SVN diff with deleted empty file"""
+        diff = (b'Index: empty-file\t(deleted)\n'
+                b'==========================================================='
+                b'========\n'
+                b'--- empty-file\t(revision 4)\n'
+                b'+++ empty-file\t(working copy)\n')
+
+        files = self.tool.get_parser(diff).parse()
+        self.assertEqual(len(files), 1)
+        self.assertEqual(files[0].origFile, 'empty-file')
+        self.assertEqual(files[0].newFile, 'empty-file')
+        self.assertEqual(files[0].origInfo, '(revision 4)')
+        self.assertEqual(files[0].newInfo, '(working copy)')
+        self.assertFalse(files[0].binary)
+        self.assertTrue(files[0].deleted)
+        self.assertEqual(files[0].insert_count, 0)
+        self.assertEqual(files[0].delete_count, 0)
+
     def test_get_branches(self):
-        """Testing SVNTool.get_branches"""
+        """Testing SVN (<backend>) get_branches"""
         branches = self.tool.get_branches()
 
         self.assertEqual(len(branches), 2)
-        self.assertEqual(branches[0], Branch('trunk', '5', True))
-        self.assertEqual(branches[1], Branch('branch1', '7', False))
+        self.assertEqual(branches[0], Branch(id='trunk', name='trunk',
+                                             commit='9', default=True))
+        self.assertEqual(branches[1], Branch(id='branches/branch1',
+                                             name='branch1',
+                                             commit='7', default=False))
 
     def test_get_commits(self):
-        """Testing SVNTool.get_commits"""
-        commits = self.tool.get_commits('5')
+        """Testing SVN (<backend>) get_commits"""
+        commits = self.tool.get_commits(start='5')
 
         self.assertEqual(len(commits), 5)
         self.assertEqual(
@@ -924,7 +1090,7 @@ class SubversionTests(SCMTestCase):
                    'Add an unterminated keyword for testing bug #1523\n',
                    '4'))
 
-        commits = self.tool.get_commits('7')
+        commits = self.tool.get_commits(start='7')
         self.assertEqual(len(commits), 7)
         self.assertEqual(
             commits[1],
@@ -934,14 +1100,58 @@ class SubversionTests(SCMTestCase):
                    'Add a branches directory',
                    '5'))
 
+    def test_get_commits_with_branch(self):
+        """Testing SVN (<backend>) get_commits with branch"""
+        commits = self.tool.get_commits(branch='/branches/branch1', start='5')
+
+        self.assertEqual(len(commits), 5)
+        self.assertEqual(
+            commits[0],
+            Commit('chipx86',
+                   '5',
+                   '2010-05-21T09:33:40.893946',
+                   'Add an unterminated keyword for testing bug #1523\n',
+                   '4'))
+
+        commits = self.tool.get_commits(branch='/branches/branch1', start='7')
+        self.assertEqual(len(commits), 6)
+        self.assertEqual(
+            commits[0],
+            Commit('david',
+                   '7',
+                   '2013-06-13T07:43:27.259554',
+                   'Add a branch',
+                   '5'))
+        self.assertEqual(
+            commits[1],
+            Commit('chipx86',
+                   '5',
+                   '2010-05-21T09:33:40.893946',
+                   'Add an unterminated keyword for testing bug #1523\n',
+                   '4'))
+
     def test_get_change(self):
-        """Testing SVNTool.get_change"""
+        """Testing SVN (<backend>) get_change"""
         commit = self.tool.get_change('5')
 
         self.assertEqual(md5(commit.message.encode('utf-8')).hexdigest(),
                          '928336c082dd756e3f7af4cde4724ebf')
         self.assertEqual(md5(commit.diff.encode('utf-8')).hexdigest(),
                          '56e50374056931c03a333f234fa63375')
+
+    def test_utf8_keywords(self):
+        """Testing SVN (<backend>) with UTF-8 files with keywords"""
+        self.repository.get_file('trunk/utf8-file.txt', '9')
+
+
+class PySVNTests(CommonSVNTestsBase):
+    backend = 'reviewboard.scmtools.svn.pysvn'
+    backend_name = 'pysvn'
+
+
+class SubvertpyTests(CommonSVNTestsBase):
+    backend = 'reviewboard.scmtools.svn.subvertpy'
+    backend_name = 'subvertpy'
 
 
 class PerforceTests(SCMTestCase):
@@ -970,6 +1180,7 @@ class PerforceTests(SCMTestCase):
         """Testing PerforceTool.get_changeset"""
         desc = self.tool.get_changeset(157)
         self.assertEqual(desc.changenum, 157)
+        self.assertEqual(type(desc.description), six.text_type)
         self.assertEqual(md5(desc.description.encode('utf-8')).hexdigest(),
                          'b7eff0ca252347cc9b09714d07397e64')
 
@@ -1171,6 +1382,12 @@ class PerforceTests(SCMTestCase):
         self.assertEqual(files[1].insert_count, 2)
         self.assertEqual(files[1].delete_count, 1)
 
+    def test_diff_file_normalization(self):
+        """Testing perforce diff filename normalization"""
+        parser = self.tool.get_parser('')
+        self.assertEqual(parser.normalize_diff_filename('//depot/test'),
+                         '//depot/test')
+
     def test_unicode_diff(self):
         """Testing Perforce diff parsing with unicode characters"""
         diff = ("--- tést.c  //depot/foo/proj/tést.c#2\n"
@@ -1312,6 +1529,38 @@ class MercurialTests(SCMTestCase):
 
         file = self._first_file_in_diff(diffContents)
         self.assertEqual(file.origFile, "readme")
+
+    def test_diff_parser_with_added_empty_file(self):
+        """Testing HgDiffParser with a diff with an added empty file"""
+        diff = (b'diff -r 356a6127ef19 -r 4960455a8e88 empty\n'
+                b'--- /dev/null\n'
+                b'+++ b/empty\n')
+
+        file = self._first_file_in_diff(diff)
+        self.assertEqual(file.origInfo, PRE_CREATION)
+        self.assertEqual(file.origFile, 'empty')
+        self.assertEqual(file.newInfo, '4960455a8e88')
+        self.assertEqual(file.newFile, 'empty')
+        self.assertFalse(file.binary)
+        self.assertFalse(file.deleted)
+        self.assertEqual(file.insert_count, 0)
+        self.assertEqual(file.delete_count, 0)
+
+    def test_diff_parser_with_deleted_empty_file(self):
+        """Testing HgDiffParser with a diff with a deleted empty file"""
+        diff = (b'diff -r 356a6127ef19 -r 4960455a8e88 empty\n'
+                b'--- a/empty\n'
+                b'+++ /dev/null\n')
+
+        file = self._first_file_in_diff(diff)
+        self.assertEqual(file.origInfo, '356a6127ef19')
+        self.assertEqual(file.origFile, 'empty')
+        self.assertEqual(file.newInfo, '4960455a8e88')
+        self.assertEqual(file.newFile, 'empty')
+        self.assertFalse(file.binary)
+        self.assertTrue(file.deleted)
+        self.assertEqual(file.insert_count, 0)
+        self.assertEqual(file.delete_count, 0)
 
     def test_diff_parser_uncommitted(self):
         """Testing HgDiffParser with a diff with an uncommitted change"""
@@ -1626,23 +1875,50 @@ class GitTests(SCMTestCase):
         """Testing parsing Git diff new file, no content"""
         diff = self._read_fixture('git_newfile_nocontent.diff')
         files = self.tool.get_parser(diff).parse()
-        self.assertEqual(len(files), 0)
+        self.assertEqual(len(files), 1)
+
+        file = self._get_file_in_diff(diff)
+        self.assertEqual(file.origFile, 'newfile')
+        self.assertEqual(file.newFile, 'newfile')
+        self.assertEqual(file.origInfo, PRE_CREATION)
+        self.assertEqual(file.newInfo, 'e69de29')
+        self.assertFalse(file.binary)
+        self.assertFalse(file.deleted)
+        lines = file.data.splitlines()
+        self.assertEqual(len(lines), 3)
+        self.assertEqual(lines[0], "diff --git a/newfile b/newfile")
+        self.assertEqual(file.insert_count, 0)
+        self.assertEqual(file.delete_count, 0)
 
     def test_new_file_no_content_with_following_diff(self):
         """Testing parsing Git diff new file, no content, with following"""
         diff = self._read_fixture('git_newfile_nocontent2.diff')
-        self.assertEqual(len(self.tool.get_parser(diff).parse()), 1)
+        files = self.tool.get_parser(diff).parse()
+        self.assertEqual(len(files), 2)
 
-        file = self._get_file_in_diff(diff)
-        self.assertEqual(file.origFile, 'cfg/testcase.ini')
-        self.assertEqual(file.newFile, 'cfg/testcase.ini')
-        self.assertEqual(file.origInfo, 'cc18ec8')
-        self.assertEqual(file.newInfo, '5e70b73')
-        self.assertEqual(file.data.splitlines()[0],
+        self.assertEqual(files[0].origFile, 'newfile')
+        self.assertEqual(files[0].newFile, 'newfile')
+        self.assertEqual(files[0].origInfo, PRE_CREATION)
+        self.assertEqual(files[0].newInfo, 'e69de29')
+        self.assertFalse(files[0].binary)
+        self.assertFalse(files[0].deleted)
+        lines = files[0].data.splitlines()
+        self.assertEqual(len(lines), 3)
+        self.assertEqual(lines[0], "diff --git a/newfile b/newfile")
+        self.assertEqual(files[0].insert_count, 0)
+        self.assertEqual(files[0].delete_count, 0)
+
+        self.assertEqual(files[1].origFile, 'cfg/testcase.ini')
+        self.assertEqual(files[1].newFile, 'cfg/testcase.ini')
+        self.assertEqual(files[1].origInfo, 'cc18ec8')
+        self.assertEqual(files[1].newInfo, '5e70b73')
+        lines = files[1].data.splitlines()
+        self.assertEqual(len(lines), 13)
+        self.assertEqual(lines[0],
                          "diff --git a/cfg/testcase.ini b/cfg/testcase.ini")
-        self.assertEqual(file.data.splitlines()[-1], '+db = pyunit')
-        self.assertEqual(file.insert_count, 2)
-        self.assertEqual(file.delete_count, 1)
+        self.assertEqual(lines[-1], '+db = pyunit')
+        self.assertEqual(files[1].insert_count, 2)
+        self.assertEqual(files[1].delete_count, 1)
 
     def test_del_file_diff(self):
         """Testing parsing Git diff with deleted file"""
@@ -1661,6 +1937,76 @@ class GitTests(SCMTestCase):
         self.assertEqual(file.data.splitlines()[-1], "-Goodbye")
         self.assertEqual(file.insert_count, 0)
         self.assertEqual(file.delete_count, 1)
+
+    def test_del_file_no_content_diff(self):
+        """Testing parsing Git diff with deleted file, no content"""
+        diff = (b'diff --git a/empty b/empty\n'
+                b'deleted file mode 100644\n'
+                b'index e69de29bb2d1d6434b8b29ae775ad8c2e48c5391..'
+                b'0000000000000000000000000000000000000000\n')
+        files = self.tool.get_parser(diff).parse()
+        self.assertEqual(len(files), 1)
+
+        self.assertEqual(files[0].origFile, 'empty')
+        self.assertEqual(files[0].newFile, 'empty')
+        self.assertEqual(files[0].origInfo,
+                         'e69de29bb2d1d6434b8b29ae775ad8c2e48c5391')
+        self.assertEqual(files[0].newInfo,
+                         '0000000000000000000000000000000000000000')
+        self.assertFalse(files[0].binary)
+        self.assertTrue(files[0].deleted)
+        self.assertEqual(len(files[0].data), 141)
+        self.assertEqual(files[0].data.splitlines()[0],
+                         "diff --git a/empty b/empty")
+        self.assertEqual(files[0].insert_count, 0)
+        self.assertEqual(files[0].delete_count, 0)
+
+    def test_del_file_no_content_with_following_diff(self):
+        """Testing parsing Git diff with deleted file, no content, with
+        following"""
+        diff = (b'diff --git a/empty b/empty\n'
+                b'deleted file mode 100644\n'
+                b'index e69de29bb2d1d6434b8b29ae775ad8c2e48c5391..'
+                b'0000000000000000000000000000000000000000\n'
+                b'diff --git a/foo/bar b/foo/bar\n'
+                b'index 484ba93ef5b0aed5b72af8f4e9dc4cfd10ef1a81..'
+                b'0ae4095ddfe7387d405bd53bd59bbb5d861114c5 100644\n'
+                b'--- a/foo/bar\n'
+                b'+++ b/foo/bar\n'
+                b'@@ -1 +1,2 @@\n'
+                b'+Hello!\n'
+                b'blah\n')
+        files = self.tool.get_parser(diff).parse()
+        self.assertEqual(len(files), 2)
+
+        self.assertEqual(files[0].origFile, 'empty')
+        self.assertEqual(files[0].newFile, 'empty')
+        self.assertEqual(files[0].origInfo,
+                         'e69de29bb2d1d6434b8b29ae775ad8c2e48c5391')
+        self.assertEqual(files[0].newInfo,
+                         '0000000000000000000000000000000000000000')
+        self.assertFalse(files[0].binary)
+        self.assertTrue(files[0].deleted)
+        self.assertEqual(len(files[0].data), 141)
+        self.assertEqual(files[0].data.splitlines()[0],
+                         "diff --git a/empty b/empty")
+        self.assertEqual(files[0].insert_count, 0)
+        self.assertEqual(files[0].delete_count, 0)
+
+        self.assertEqual(files[1].origFile, 'foo/bar')
+        self.assertEqual(files[1].newFile, 'foo/bar')
+        self.assertEqual(files[1].origInfo,
+                         '484ba93ef5b0aed5b72af8f4e9dc4cfd10ef1a81')
+        self.assertEqual(files[1].newInfo,
+                         '0ae4095ddfe7387d405bd53bd59bbb5d861114c5')
+        self.assertFalse(files[1].binary)
+        self.assertFalse(files[1].deleted)
+        lines = files[1].data.splitlines()
+        self.assertEqual(len(lines), 7)
+        self.assertEqual(lines[0], "diff --git a/foo/bar b/foo/bar")
+        self.assertEqual(lines[5], "+Hello!")
+        self.assertEqual(files[1].insert_count, 1)
+        self.assertEqual(files[1].delete_count, 0)
 
     def test_binary_diff(self):
         """Testing parsing Git diff with binary"""
@@ -1686,7 +2032,7 @@ class GitTests(SCMTestCase):
         """Testing parsing Git diff with existing and new files"""
         diff = self._read_fixture('git_complex.diff')
         files = self.tool.get_parser(diff).parse()
-        self.assertEqual(len(files), 6)
+        self.assertEqual(len(files), 7)
         self.assertEqual(files[0].origFile, 'cfg/testcase.ini')
         self.assertEqual(files[0].newFile, 'cfg/testcase.ini')
         self.assertEqual(files[0].origInfo, '5e35098')
@@ -1701,30 +2047,43 @@ class GitTests(SCMTestCase):
         self.assertEqual(files[0].data.splitlines()[13],
                          "         if isinstance(value, basestring):")
 
-        self.assertEqual(files[1].origFile, 'tests/tests.py')
-        self.assertEqual(files[1].newFile, 'tests/tests.py')
+        self.assertEqual(files[1].origFile, 'tests/models.py')
+        self.assertEqual(files[1].newFile, 'tests/models.py')
         self.assertEqual(files[1].origInfo, PRE_CREATION)
-        self.assertEqual(files[1].newInfo, 'e279a06')
+        self.assertEqual(files[1].newInfo, 'e69de29')
         self.assertFalse(files[1].binary)
         self.assertFalse(files[1].deleted)
-        self.assertEqual(files[1].insert_count, 2)
+        self.assertEqual(files[1].insert_count, 0)
         self.assertEqual(files[1].delete_count, 0)
         lines = files[1].data.splitlines()
+        self.assertEqual(len(lines), 3)
+        self.assertEqual(lines[0],
+                         "diff --git a/tests/models.py b/tests/models.py")
+
+        self.assertEqual(files[2].origFile, 'tests/tests.py')
+        self.assertEqual(files[2].newFile, 'tests/tests.py')
+        self.assertEqual(files[2].origInfo, PRE_CREATION)
+        self.assertEqual(files[2].newInfo, 'e279a06')
+        self.assertFalse(files[2].binary)
+        self.assertFalse(files[2].deleted)
+        self.assertEqual(files[2].insert_count, 2)
+        self.assertEqual(files[2].delete_count, 0)
+        lines = files[2].data.splitlines()
         self.assertEqual(len(lines), 8)
         self.assertEqual(lines[0],
                          "diff --git a/tests/tests.py b/tests/tests.py")
         self.assertEqual(lines[7],
                          "+This is some new content")
 
-        self.assertEqual(files[2].origFile, 'pysvn-1.5.1.tar.gz')
-        self.assertEqual(files[2].newFile, 'pysvn-1.5.1.tar.gz')
-        self.assertEqual(files[2].origInfo, PRE_CREATION)
-        self.assertEqual(files[2].newInfo, '86b520c')
-        self.assertTrue(files[2].binary)
-        self.assertFalse(files[2].deleted)
-        self.assertEqual(files[2].insert_count, 0)
-        self.assertEqual(files[2].delete_count, 0)
-        lines = files[2].data.splitlines()
+        self.assertEqual(files[3].origFile, 'pysvn-1.5.1.tar.gz')
+        self.assertEqual(files[3].newFile, 'pysvn-1.5.1.tar.gz')
+        self.assertEqual(files[3].origInfo, PRE_CREATION)
+        self.assertEqual(files[3].newInfo, '86b520c')
+        self.assertTrue(files[3].binary)
+        self.assertFalse(files[3].deleted)
+        self.assertEqual(files[3].insert_count, 0)
+        self.assertEqual(files[3].delete_count, 0)
+        lines = files[3].data.splitlines()
         self.assertEqual(len(lines), 4)
         self.assertEqual(
             lines[0], "diff --git a/pysvn-1.5.1.tar.gz b/pysvn-1.5.1.tar.gz")
@@ -1732,41 +2091,41 @@ class GitTests(SCMTestCase):
                          'Binary files /dev/null and b/pysvn-1.5.1.tar.gz '
                          'differ')
 
-        self.assertEqual(files[3].origFile, 'readme')
-        self.assertEqual(files[3].newFile, 'readme')
-        self.assertEqual(files[3].origInfo, '5e35098')
-        self.assertEqual(files[3].newInfo, 'e254ef4')
-        self.assertFalse(files[3].binary)
-        self.assertFalse(files[3].deleted)
-        self.assertEqual(files[3].insert_count, 1)
-        self.assertEqual(files[3].delete_count, 1)
-        lines = files[3].data.splitlines()
+        self.assertEqual(files[4].origFile, 'readme')
+        self.assertEqual(files[4].newFile, 'readme')
+        self.assertEqual(files[4].origInfo, '5e35098')
+        self.assertEqual(files[4].newInfo, 'e254ef4')
+        self.assertFalse(files[4].binary)
+        self.assertFalse(files[4].deleted)
+        self.assertEqual(files[4].insert_count, 1)
+        self.assertEqual(files[4].delete_count, 1)
+        lines = files[4].data.splitlines()
         self.assertEqual(len(lines), 7)
         self.assertEqual(lines[0], "diff --git a/readme b/readme")
         self.assertEqual(lines[6], "+Hello there")
 
-        self.assertEqual(files[4].origFile, 'OLDFILE')
-        self.assertEqual(files[4].newFile, 'OLDFILE')
-        self.assertEqual(files[4].origInfo, '8ebcb01')
-        self.assertEqual(files[4].newInfo, '0000000')
-        self.assertFalse(files[4].binary)
-        self.assertTrue(files[4].deleted)
-        self.assertEqual(files[4].insert_count, 0)
-        self.assertEqual(files[4].delete_count, 1)
-        lines = files[4].data.splitlines()
+        self.assertEqual(files[5].origFile, 'OLDFILE')
+        self.assertEqual(files[5].newFile, 'OLDFILE')
+        self.assertEqual(files[5].origInfo, '8ebcb01')
+        self.assertEqual(files[5].newInfo, '0000000')
+        self.assertFalse(files[5].binary)
+        self.assertTrue(files[5].deleted)
+        self.assertEqual(files[5].insert_count, 0)
+        self.assertEqual(files[5].delete_count, 1)
+        lines = files[5].data.splitlines()
         self.assertEqual(len(lines), 7)
         self.assertEqual(lines[0], "diff --git a/OLDFILE b/OLDFILE")
         self.assertEqual(lines[6], "-Goodbye")
 
-        self.assertEqual(files[5].origFile, 'readme2')
-        self.assertEqual(files[5].newFile, 'readme2')
-        self.assertEqual(files[5].origInfo, '5e43098')
-        self.assertEqual(files[5].newInfo, 'e248ef4')
-        self.assertFalse(files[5].binary)
-        self.assertFalse(files[5].deleted)
-        self.assertEqual(files[5].insert_count, 1)
-        self.assertEqual(files[5].delete_count, 1)
-        lines = files[5].data.splitlines()
+        self.assertEqual(files[6].origFile, 'readme2')
+        self.assertEqual(files[6].newFile, 'readme2')
+        self.assertEqual(files[6].origInfo, '5e43098')
+        self.assertEqual(files[6].newInfo, 'e248ef4')
+        self.assertFalse(files[6].binary)
+        self.assertFalse(files[6].deleted)
+        self.assertEqual(files[6].insert_count, 1)
+        self.assertEqual(files[6].delete_count, 1)
+        lines = files[6].data.splitlines()
         self.assertEqual(len(lines), 7)
         self.assertEqual(lines[0], "diff --git a/readme2 b/readme2")
         self.assertEqual(lines[6], "+Hello there")
@@ -2001,7 +2360,7 @@ class PolicyTests(TestCase):
         self.assertTrue(self.repo.is_accessible_by(self.user))
         self.assertTrue(self.repo.is_accessible_by(self.anonymous))
 
-        self.assertTrue(self.repo in Repository.objects.accessible(self.user))
+        self.assertIn(self.repo, Repository.objects.accessible(self.user))
         self.assertTrue(
             self.repo in Repository.objects.accessible(self.anonymous))
 
@@ -2013,7 +2372,7 @@ class PolicyTests(TestCase):
         self.assertFalse(self.repo.is_accessible_by(self.user))
         self.assertFalse(self.repo.is_accessible_by(self.anonymous))
 
-        self.assertFalse(self.repo in Repository.objects.accessible(self.user))
+        self.assertNotIn(self.repo, Repository.objects.accessible(self.user))
         self.assertFalse(
             self.repo in Repository.objects.accessible(self.anonymous))
 
@@ -2026,7 +2385,7 @@ class PolicyTests(TestCase):
         self.assertTrue(self.repo.is_accessible_by(self.user))
         self.assertFalse(self.repo.is_accessible_by(self.anonymous))
 
-        self.assertTrue(self.repo in Repository.objects.accessible(self.user))
+        self.assertIn(self.repo, Repository.objects.accessible(self.user))
         self.assertFalse(
             self.repo in Repository.objects.accessible(self.anonymous))
 
@@ -2042,7 +2401,7 @@ class PolicyTests(TestCase):
         self.assertTrue(self.repo.is_accessible_by(self.user))
         self.assertFalse(self.repo.is_accessible_by(self.anonymous))
 
-        self.assertTrue(self.repo in Repository.objects.accessible(self.user))
+        self.assertIn(self.repo, Repository.objects.accessible(self.user))
         self.assertFalse(
             self.repo in Repository.objects.accessible(self.anonymous))
 
@@ -2356,7 +2715,7 @@ class RepositoryFormTests(TestCase):
         repository = form.save()
         self.assertFalse(repository.extra_data['bug_tracker_use_hosting'])
         self.assertEqual(repository.bug_tracker, 'http://example.com/issue/%s')
-        self.assertFalse('bug_tracker_type' in repository.extra_data)
+        self.assertNotIn('bug_tracker_type', repository.extra_data)
 
     def test_with_hosting_service_bug_tracker_service(self):
         """Testing RepositoryForm with a bug tracker service"""
@@ -2446,7 +2805,7 @@ class RepositoryFormTests(TestCase):
         self.assertTrue(repository.extra_data['bug_tracker_use_hosting'])
         self.assertEqual(repository.bug_tracker,
                          'http://example.com/testuser/testrepo/issue/%s')
-        self.assertFalse('bug_tracker_type' in repository.extra_data)
+        self.assertNotIn('bug_tracker_type', repository.extra_data)
         self.assertFalse('bug_tracker-test_repo_name'
                          in repository.extra_data)
         self.assertFalse('bug_tracker-hosting_account_username'
@@ -2484,7 +2843,7 @@ class RepositoryFormTests(TestCase):
         self.assertTrue(repository.extra_data['bug_tracker_use_hosting'])
         self.assertEqual(repository.bug_tracker,
                          'https://example.com/testrepo/issue/%s')
-        self.assertFalse('bug_tracker_type' in repository.extra_data)
+        self.assertNotIn('bug_tracker_type', repository.extra_data)
         self.assertFalse('bug_tracker-test_repo_name'
                          in repository.extra_data)
         self.assertFalse('bug_tracker_hosting_url'
@@ -2509,7 +2868,7 @@ class RepositoryFormTests(TestCase):
         repository = form.save()
         self.assertFalse(repository.extra_data['bug_tracker_use_hosting'])
         self.assertEqual(repository.bug_tracker, '')
-        self.assertFalse('bug_tracker_type' in repository.extra_data)
+        self.assertNotIn('bug_tracker_type', repository.extra_data)
 
     def test_with_hosting_service_with_existing_custom_bug_tracker(self):
         """Testing RepositoryForm with existing custom bug tracker"""
@@ -2537,8 +2896,8 @@ class RepositoryFormTests(TestCase):
             form._get_field_data('bug_tracker_hosting_account_username'),
             'testuser')
 
-        self.assertTrue('test' in form.bug_tracker_forms)
-        self.assertTrue('default' in form.bug_tracker_forms['test'])
+        self.assertIn('test', form.bug_tracker_forms)
+        self.assertIn('default', form.bug_tracker_forms['test'])
         bitbucket_form = form.bug_tracker_forms['test']['default']
         self.assertEqual(
             bitbucket_form.fields['test_repo_name'].initial,

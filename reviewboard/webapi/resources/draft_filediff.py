@@ -22,6 +22,7 @@ class DraftFileDiffResource(FileDiffResource):
     applies to exactly one file on a repository.
     """
     name = 'draft_file'
+    policy_id = 'draft_file_diff'
     uri_name = 'files'
     allowed_methods = ('GET', 'PUT')
     item_result_key = 'file'
@@ -30,8 +31,8 @@ class DraftFileDiffResource(FileDiffResource):
     mimetype_item_resource_name = 'file'
 
     item_child_resources = [
-        resources.original_file,
-        resources.patched_file,
+        resources.draft_original_file,
+        resources.draft_patched_file,
     ]
 
     def get_queryset(self, request, diff_revision, *args, **kwargs):

@@ -379,7 +379,13 @@ class PerforceTool(SCMTool):
         # everything around the 'Affected files ...' line, and process the
         # results.
         changeset.username = changedesc['user']
-        changeset.description = changedesc['desc']
+
+        try:
+            changeset.description = changedesc['desc'].decode('utf-8')
+        except UnicodeDecodeError:
+            changeset.description = changedesc['desc'].decode('utf-8',
+                                                              'replace')
+
         if changedesc['status'] == "pending":
             changeset.pending = True
         try:
@@ -475,3 +481,12 @@ class PerforceDiffParser(DiffParser):
             linenum += 2
 
         return linenum
+
+    def normalize_diff_filename(self, filename):
+        """Normalize filenames in diffs.
+
+        The default behavior of stripping off leading slashes doesn't work for
+        Perforce (because depot paths start with //), so this overrides it to
+        just return the filename un-molested.
+        """
+        return filename

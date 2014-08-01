@@ -1,6 +1,5 @@
 from __future__ import unicode_literals
 
-import imp
 import logging
 import sys
 
@@ -11,6 +10,7 @@ from django.utils import six
 from django.utils.translation import ugettext_lazy as _
 from djblets.util.filesystem import is_exe_in_path
 
+from reviewboard.admin.import_utils import has_module
 from reviewboard.admin.validation import validate_bug_tracker
 from reviewboard.hostingsvcs.errors import (AuthorizationError,
                                             SSHKeyAssociationError,
@@ -178,6 +178,7 @@ class RepositoryForm(forms.ModelForm):
         self.hostkeyerror = None
         self.certerror = None
         self.userkeyerror = None
+        self.bug_tracker_host_error = None
         self.hosting_account_linked = False
         self.local_site = None
         self.repository_forms = {}
@@ -218,18 +219,18 @@ class RepositoryForm(forms.ModelForm):
         hosting_service_choices = []
         bug_tracker_choices = []
 
-        for hosting_service_id, hosting_service in get_hosting_services():
+        for hosting_service in get_hosting_services():
             if hosting_service.supports_repositories:
-                hosting_service_choices.append((hosting_service_id,
+                hosting_service_choices.append((hosting_service.id,
                                                 hosting_service.name))
 
             if hosting_service.supports_bug_trackers:
-                bug_tracker_choices.append((hosting_service_id,
+                bug_tracker_choices.append((hosting_service.id,
                                             hosting_service.name))
 
-            self.bug_tracker_forms[hosting_service_id] = {}
-            self.repository_forms[hosting_service_id] = {}
-            self.hosting_service_info[hosting_service_id] = {
+            self.bug_tracker_forms[hosting_service.id] = {}
+            self.repository_forms[hosting_service.id] = {}
+            self.hosting_service_info[hosting_service.id] = {
                 'scmtools': hosting_service.supported_scmtools,
                 'plans': [],
                 'planInfo': {},
@@ -249,7 +250,7 @@ class RepositoryForm(forms.ModelForm):
                         'is_authorized': account.is_authorized,
                     }
                     for account in hosting_accounts
-                    if account.service_name == hosting_service_id
+                    if account.service_name == hosting_service.id
                 ],
             }
 
@@ -259,14 +260,14 @@ class RepositoryForm(forms.ModelForm):
                         form = info.get('form', None)
 
                         if form:
-                            self._load_hosting_service(hosting_service_id,
+                            self._load_hosting_service(hosting_service.id,
                                                        hosting_service,
                                                        type_id,
                                                        info['name'],
                                                        form,
                                                        *args, **kwargs)
                 elif hosting_service.form:
-                    self._load_hosting_service(hosting_service_id,
+                    self._load_hosting_service(hosting_service.id,
                                                hosting_service,
                                                self.DEFAULT_PLAN_ID,
                                                self.DEFAULT_PLAN_NAME,
@@ -274,7 +275,7 @@ class RepositoryForm(forms.ModelForm):
                                                *args, **kwargs)
             except Exception as e:
                 logging.error('Error loading hosting service %s: %s'
-                              % (hosting_service_id, e),
+                              % (hosting_service.id, e),
                               exc_info=1)
 
         # Build the list of hosting service choices, sorted, with
@@ -917,6 +918,33 @@ class RepositoryForm(forms.ModelForm):
     def clean_bug_tracker_base_url(self):
         return self.cleaned_data['bug_tracker_base_url'].rstrip('/')
 
+    def clean_bug_tracker_hosting_url(self):
+        """Validates that the bug tracker hosting url is valid.
+
+        Note that bug tracker hosting url is whatever the bug hosting form
+        (e.g BugzillaForm) specifies.
+
+        cleaned_data['bug_tracker_hosting_url'] refers to a specific field
+        in bug tracker description that only GitLab uses, and has quite a
+        misleading name. It will not contain the base URL of the bug tracker
+        in other cases.
+        """
+        bug_tracker_use_hosting = self.cleaned_data['bug_tracker_use_hosting']
+        if not bug_tracker_use_hosting:
+            bug_tracker_type = self.cleaned_data['bug_tracker_type']
+
+            # If the validator exception was thrown, the form will
+            # have at least one error present in the errors object. If errors
+            # were detected, set an appropriate variable that is_valid()
+            # method will check.
+            if bug_tracker_type in self.bug_tracker_forms:
+                field = self.bug_tracker_forms[bug_tracker_type]['default']
+                self.bug_tracker_host_error = (
+                    hasattr(field, 'errors') and
+                    len(field.errors) > 0)
+
+        return self.cleaned_data['bug_tracker_hosting_url'].strip()
+
     def clean_hosting_type(self):
         """Validates that the hosting type represents a valid hosting service.
 
@@ -962,10 +990,8 @@ class RepositoryForm(forms.ModelForm):
         errors = []
 
         for dep in scmtool_class.dependencies.get('modules', []):
-            try:
-                imp.find_module(dep)
-            except ImportError:
-                errors.append(_('The Python module "%s" is not installed.'
+            if not has_module(dep):
+                errors.append(_('The Python module "%s" is not installed. '
                                 'You may need to restart the server '
                                 'after installing it.') % dep)
 
@@ -1004,6 +1030,7 @@ class RepositoryForm(forms.ModelForm):
         return (not self.hostkeyerror and
                 not self.certerror and
                 not self.userkeyerror and
+                not self.bug_tracker_host_error and
                 not self.cleaned_data['reedit_repository'] and
                 (hosting_type not in self.repository_forms or
                  self.repository_forms[hosting_type][plan].is_valid()))
@@ -1160,7 +1187,11 @@ class RepositoryForm(forms.ModelForm):
                 if self.cleaned_data['trust_host']:
                     try:
                         self.cert = scmtool_class.accept_certificate(
-                            path, self.local_site_name, e.certificate)
+                            path,
+                            username=username,
+                            password=password,
+                            local_site_name=self.local_site_name,
+                            certificate=e.certificate)
                     except IOError as e:
                         raise ValidationError(e)
                 else:

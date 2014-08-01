@@ -55,6 +55,21 @@ class ReviewUI(object):
 
         self.diff_against_obj = obj
 
+    def is_enabled_for(self, user=None, review_request=None,
+                       file_attachment=None, **kwargs):
+        """Returns whether the review UI is enabled under the given criteria.
+
+        This can enable or disable a review UI's functionality, both on the
+        file attachment thumbnail and review UI page, depending on the
+        user, review request, file attachment, or some state associated with
+        one or more of those.
+
+        When this is called, the arguments are always passed as keyword
+        arguments. Subclasses don't need to accept all the arguments, as
+        long as they take a **kwargs.
+        """
+        return True
+
     def render_to_response(self, request):
         """Renders the review UI to an HttpResponse.
 
@@ -83,8 +98,14 @@ class ReviewUI(object):
 
         draft = self.review_request.get_draft(request.user)
         review_request_details = draft or self.review_request
+
+        close_description, close_description_rich_text = \
+            self.review_request.get_close_description()
+
         context = {
             'caption': self.get_caption(draft),
+            'close_description': close_description,
+            'close_description_rich_text': close_description_rich_text,
             'comments': self.get_comments(),
             'draft': draft,
             'last_activity_time': last_activity_time,

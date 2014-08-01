@@ -16,6 +16,9 @@ class Client(object):
     ID_KEYWORDS = ['Id']
     HEADER_KEYWORDS = ['Header']
 
+    LOG_DEFAULT_START = 'HEAD'
+    LOG_DEFAULT_END = '1'
+
     # Mapping of keywords to known aliases
     keywords = {
         # Standard keywords
@@ -37,22 +40,7 @@ class Client(object):
     def __init__(self, config_dir, repopath, username=None, password=None):
         self.repopath = repopath
 
-    @property
-    def branches(self):
-        """Returns a list of branches.
-
-        This assumes the standard layout in the repository."""
-        raise NotImplementedError
-
-    def get_commits(self, start):
-        """Returns a list of commits."""
-        raise NotImplementedError
-
-    def get_change(self, revision, cache_key):
-        """Get an individual change.
-
-        This returns a tuple with the commit message and the diff contents.
-        """
+    def set_ssl_server_trust_prompt(self, cb):
         raise NotImplementedError
 
     def get_file(self, path, revision=HEAD):
@@ -61,6 +49,43 @@ class Client(object):
 
     def get_keywords(self, path, revision=HEAD):
         """Returns a list of SVN keywords for a given path."""
+        raise NotImplementedError
+
+    def get_log(self, path, start=None, end=None, limit=None,
+                discover_changed_paths=False, limit_to_path=False):
+        """Returns log entries at the specified path.
+
+        The log entries will appear ordered from most recent to least,
+        with 'start' being the most recent commit in the range.
+
+        If 'start' is not specified, then it will default to 'HEAD'. If
+        'end' is not specified, it will default to '1'.
+
+        To limit the commits to the given path, not factoring in history
+        from any branch operations, set 'limit_to_path' to True.
+        """
+        raise NotImplementedError
+
+    def list_dir(self, path):
+        """Lists the contents of the specified path.
+
+        The result will be an ordered dictionary of contents, mapping
+        filenames or directory names with a dictionary containing:
+
+        * ``path``        - The full path of the file or directory.
+        * ``created_rev`` - The revision where the file or directory was
+                            created.
+        """
+        raise NotImplementedError
+
+    def diff(self, revision1, revision2, path=None):
+        """Returns a diff between two revisions.
+
+        The diff will contain the differences between the two revisions,
+        and may optionally be limited to a specific path.
+
+        The returned diff will be returned as a Unicode object.
+        """
         raise NotImplementedError
 
     def collapse_keywords(self, data, keyword_str):
@@ -80,16 +105,16 @@ class Client(object):
         """
         def repl(m):
             if m.group(2):
-                return "$%s::%s$" % (m.group(1), " " * len(m.group(3)))
+                return b'$%s::%s$' % (m.group(1), b' ' * len(m.group(3)))
 
-            return "$%s$" % m.group(1)
+            return b'$%s$' % m.group(1)
 
         # Get any aliased keywords
-        keywords = [keyword
+        keywords = [re.escape(keyword).encode('utf-8')
                     for name in re.split(r'\W+', keyword_str)
                     for keyword in self.keywords.get(name, [])]
 
-        return re.sub(r"\$(%s):(:?)([^\$\n\r]*)\$" % '|'.join(keywords),
+        return re.sub(b'\\$(%s):(:?)([^\\$\\n\\r]*)\$' % b'|'.join(keywords),
                       repl, data)
 
     def get_filenames_in_revision(self, revision):

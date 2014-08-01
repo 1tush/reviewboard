@@ -13,7 +13,7 @@ from djblets.db.query import get_object_or_none
 
 from reviewboard.attachments.models import FileAttachment
 from reviewboard.changedescs.models import ChangeDescription
-from reviewboard.diffviewer.models import DiffSet, DiffSetHistory, FileDiff
+from reviewboard.diffviewer.models import DiffSet, DiffSetHistory
 from reviewboard.reviews.errors import PermissionError
 from reviewboard.reviews.managers import ReviewRequestManager
 from reviewboard.reviews.models.base_comment import BaseComment
@@ -225,7 +225,8 @@ class ReviewRequest(BaseReviewRequestDetails):
         _('dropped issue count'),
         initializer=_initialize_issue_counts)
 
-    local_site = models.ForeignKey(LocalSite, blank=True, null=True)
+    local_site = models.ForeignKey(LocalSite, blank=True, null=True,
+                                   related_name='review_requests')
     local_id = models.IntegerField('site-local ID', blank=True, null=True)
 
     # Set this up with the ReviewRequestManager
@@ -526,12 +527,6 @@ class ReviewRequest(BaseReviewRequestDetails):
 
         return self._diffsets
 
-    def get_all_diff_filenames(self):
-        """Returns a set of filenames from files in all diffsets."""
-        q = FileDiff.objects.filter(
-            diffset__history__id=self.diffset_history_id)
-        return set(q.values_list('source_file', 'dest_file'))
-
     def get_latest_diffset(self):
         """Returns the latest diffset for this review request."""
         try:
@@ -539,6 +534,30 @@ class ReviewRequest(BaseReviewRequestDetails):
                 history=self.diffset_history_id).latest()
         except DiffSet.DoesNotExist:
             return None
+
+    def get_close_description(self):
+        """Returns a tuple (description, is_rich_text) for the close text.
+
+        This is a helper which is used to gather the data which is rendered in
+        the close description boxes on various pages.
+        """
+        try:
+            latest_changedesc = \
+                self.changedescs.filter(public=True).latest()
+        except ChangeDescription.DoesNotExist:
+            latest_changedesc = None
+
+        close_description = ''
+        is_rich_text = False
+
+        if latest_changedesc and 'status' in latest_changedesc.fields_changed:
+            status = latest_changedesc.fields_changed['status']['new'][0]
+
+            if status in (ReviewRequest.DISCARDED, ReviewRequest.SUBMITTED):
+                close_description = latest_changedesc.text
+                is_rich_text = latest_changedesc.rich_text
+
+        return (close_description, is_rich_text)
 
     def get_blocks(self):
         """Returns the list of review request this one blocks.
@@ -581,23 +600,8 @@ class ReviewRequest(BaseReviewRequestDetails):
         if self.status == self.PENDING_REVIEW:
             site_profile.decrement_pending_outgoing_request_count()
 
-        if self.public:
-            people = self.target_people.all()
-            groups = self.target_groups.all()
-
-            Group.incoming_request_count.decrement(groups)
-            LocalSiteProfile.direct_incoming_request_count.decrement(
-                LocalSiteProfile.objects.filter(user__in=people,
-                                                local_site=local_site))
-            LocalSiteProfile.total_incoming_request_count.decrement(
-                LocalSiteProfile.objects.filter(
-                    Q(local_site=local_site) &
-                    Q(Q(user__review_groups__in=groups) |
-                      Q(user__in=people))))
-            LocalSiteProfile.starred_public_request_count.decrement(
-                LocalSiteProfile.objects.filter(
-                    profile__starred_review_requests=self,
-                    local_site=local_site))
+            if self.public:
+                self._decrement_reviewer_counts()
 
         super(ReviewRequest, self).delete(**kwargs)
 
@@ -689,8 +693,6 @@ class ReviewRequest(BaseReviewRequestDetails):
         The review request will be mark as public, and signals will be
         emitted for any listeners.
         """
-        from reviewboard.accounts.models import LocalSiteProfile
-
         if not self.is_mutable_by(user):
             raise PermissionError
 
@@ -707,20 +709,7 @@ class ReviewRequest(BaseReviewRequestDetails):
         # Decrement should not happen while publishing
         # a new request or a discarded request
         if self.public:
-            Group.incoming_request_count.decrement(self.target_groups.all())
-            LocalSiteProfile.direct_incoming_request_count.decrement(
-                LocalSiteProfile.objects.filter(
-                    user__in=self.target_people.all(),
-                    local_site=self.local_site))
-            LocalSiteProfile.total_incoming_request_count.decrement(
-                LocalSiteProfile.objects.filter(
-                    Q(local_site=self.local_site) &
-                    Q(Q(user__review_groups__in=self.target_groups.all()) |
-                      Q(user__in=self.target_people.all()))))
-            LocalSiteProfile.starred_public_request_count.decrement(
-                LocalSiteProfile.objects.filter(
-                    profile__starred_review_requests=self,
-                    local_site=self.local_site))
+            self._decrement_reviewer_counts()
 
         if draft is not None:
             # This will in turn save the review request, so we'll be done.
@@ -778,43 +767,54 @@ class ReviewRequest(BaseReviewRequestDetails):
                 site_profile.increment_pending_outgoing_request_count()
 
             if self.public and self.id is not None:
-                groups = self.target_groups.all()
-                people = self.target_people.all()
-
-                Group.incoming_request_count.increment(groups)
-                LocalSiteProfile.direct_incoming_request_count.increment(
-                    LocalSiteProfile.objects.filter(user__in=people,
-                                                    local_site=local_site))
-                LocalSiteProfile.total_incoming_request_count.increment(
-                    LocalSiteProfile.objects.filter(
-                        Q(local_site=local_site) &
-                        Q(Q(user__review_groups__in=groups) |
-                          Q(user__in=people))))
-                LocalSiteProfile.starred_public_request_count.increment(
-                    LocalSiteProfile.objects.filter(
-                        profile__starred_review_requests=self,
-                        local_site=local_site))
-        else:
+                self._increment_reviewer_counts()
+        elif old_status == self.PENDING_REVIEW:
             if old_status != self.status:
                 site_profile.decrement_pending_outgoing_request_count()
 
             if old_public:
-                groups = self.target_groups.all()
-                people = self.target_people.all()
+                self._decrement_reviewer_counts()
 
-                Group.incoming_request_count.decrement(groups)
-                LocalSiteProfile.direct_incoming_request_count.decrement(
-                    LocalSiteProfile.objects.filter(user__in=people,
-                                                    local_site=local_site))
-                LocalSiteProfile.total_incoming_request_count.decrement(
-                    LocalSiteProfile.objects.filter(
-                        Q(local_site=local_site) &
-                        Q(Q(user__review_groups__in=groups) |
-                          Q(user__in=people))))
-                LocalSiteProfile.starred_public_request_count.decrement(
-                    LocalSiteProfile.objects.filter(
-                        profile__starred_review_requests=self,
-                        local_site=local_site))
+    def _increment_reviewer_counts(self):
+        from reviewboard.accounts.models import LocalSiteProfile
+
+        groups = self.target_groups.all()
+        people = self.target_people.all()
+
+        Group.incoming_request_count.increment(groups)
+        LocalSiteProfile.direct_incoming_request_count.increment(
+            LocalSiteProfile.objects.filter(user__in=people,
+                                            local_site=self.local_site))
+        LocalSiteProfile.total_incoming_request_count.increment(
+            LocalSiteProfile.objects.filter(
+                Q(local_site=self.local_site) &
+                Q(Q(user__review_groups__in=groups) |
+                  Q(user__in=people))))
+        LocalSiteProfile.starred_public_request_count.increment(
+            LocalSiteProfile.objects.filter(
+                profile__starred_review_requests=self,
+                local_site=self.local_site))
+
+    def _decrement_reviewer_counts(self):
+        from reviewboard.accounts.models import LocalSiteProfile
+
+        groups = self.target_groups.all()
+        people = self.target_people.all()
+
+        Group.incoming_request_count.decrement(groups)
+        LocalSiteProfile.direct_incoming_request_count.decrement(
+            LocalSiteProfile.objects.filter(
+                user__in=people,
+                local_site=self.local_site))
+        LocalSiteProfile.total_incoming_request_count.decrement(
+            LocalSiteProfile.objects.filter(
+                Q(local_site=self.local_site) &
+                Q(Q(user__review_groups__in=groups) |
+                  Q(user__in=people))))
+        LocalSiteProfile.starred_public_request_count.decrement(
+            LocalSiteProfile.objects.filter(
+                profile__starred_review_requests=self,
+                local_site=self.local_site))
 
     def _calculate_approval(self):
         """Calculates the approval information for the review request."""

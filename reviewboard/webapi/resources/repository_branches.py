@@ -16,6 +16,8 @@ class RepositoryBranchesResource(WebAPIResource):
 
     Returns an array of objects with the following fields:
 
+        'id' is the ID of the branch.
+
         'name' is simply the name of the branch.
 
         'commit' is a string representing the revision identifier of the
@@ -31,6 +33,7 @@ class RepositoryBranchesResource(WebAPIResource):
     This is not available for all types of repositories.
     """
     name = 'branches'
+    policy_id = 'repository_branches'
     singleton = True
     allowed_methods = ('GET',)
     mimetype_item_resource_name = 'repository-branches'
@@ -50,6 +53,7 @@ class RepositoryBranchesResource(WebAPIResource):
             branches = []
             for branch in repository.get_branches():
                 branches.append({
+                    'id': branch.id,
                     'name': branch.name,
                     'commit': branch.commit,
                     'default': branch.default,

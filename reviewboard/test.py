@@ -61,6 +61,7 @@ class RBTestRunner(DjangoTestSuiteRunner):
         # Default to testing in a non-subdir install.
         settings.SITE_ROOT = "/"
 
+        settings.AJAX_SERIAL = 123
         settings.STATIC_URL = settings.SITE_ROOT + 'static/'
         settings.MEDIA_URL = settings.SITE_ROOT + 'media/'
         settings.PASSWORD_HASHERS = (
@@ -93,10 +94,6 @@ class RBTestRunner(DjangoTestSuiteRunner):
 
         for package in settings.TEST_PACKAGES:
             self.nose_argv.append('--where=%s' % package)
-
-        if '--with-webtests' in sys.argv:
-            self.nose_argv.append('--where=webtests')
-            sys.argv.remove('--with-webtests')
 
         if '--with-profiling' in sys.argv:
             sys.argv.remove('--with-profiling')

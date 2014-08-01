@@ -2,7 +2,7 @@
 Search Indexing
 ===============
 
-You can enable search indexing by going into hte :ref:`general-settings`
+You can enable search indexing by going into the :ref:`general-settings`
 page and toggling :guilabel:`Enable search`. The
 :guilabel:`Search index file` field must be filled out to specify the
 desired directory where the search index will be stored. Usually this will
@@ -11,16 +11,15 @@ be a directory under your site directory.
 Now you will need to set up a scheduled command to run periodically to
 update the search index. On Linux or other Unix-based systems with
 :command:`cron`, you can install the provided ``crontab`` file. This is
-available at :file:`conf/search-cron.conf` under your site directory. For
+available at :file:`conf/cron.conf` under your site directory. For
 example, to install the crontab for the current user, type::
 
-    $ crontab /path/to/site/conf/search-cron.conf
+    $ crontab /path/to/site/conf/cron.conf
 
 Make sure the user with the crontab has permissions to write to the search
 index file you specified above, as well as the search index's parent directory.
 
-The default crontab will perform an index update every 10 minutes, and do
-a full index every week on Sunday at 2AM.
+The default crontab will perform an index update every 10 minutes.
 
 You will want to perform one full index before you can use this. To do
 this, type the following as the user who owns the cronjob::

@@ -2582,7 +2582,7 @@
     "fields": {
         "username": "testuser", 
         "local_site": null, 
-        "service_name": "", 
+        "service_name": "github", 
         "visible": true, 
         "hosting_url": null, 
         "data": "{}"
@@ -2600,6 +2600,7 @@
         "invite_only": false, 
         "extra_data": "{}", 
         "mailing_list": "devgroup@example.com", 
+        "email_list_only": true, 
         "users": [
             2, 
             3
@@ -2618,6 +2619,7 @@
         "invite_only": false, 
         "extra_data": "{}", 
         "mailing_list": "newgroup@example.com", 
+        "email_list_only": true, 
         "users": []
     }
 },
@@ -2633,6 +2635,7 @@
         "invite_only": false, 
         "extra_data": "{}", 
         "mailing_list": "", 
+        "email_list_only": true, 
         "users": []
     }
 },
@@ -2648,6 +2651,7 @@
         "invite_only": false, 
         "extra_data": "{}", 
         "mailing_list": "", 
+        "email_list_only": true, 
         "users": [
             2, 
             3, 
@@ -3645,6 +3649,20 @@
         "password": "", 
         "tool": 1, 
         "users": []
+    }
+},
+{
+    "pk": 1, 
+    "model": "webapi.webapitoken", 
+    "fields": {
+        "last_updated": "2014-07-08T10:58:04.652Z", 
+        "local_site": null, 
+        "note": "This is my token for local testing.", 
+        "token": "709b0f04ccbd22dc2b16af8c286bcba75f31eb6d", 
+        "user": 1, 
+        "policy": "{\"perms\": \"rw\"}", 
+        "time_added": "2014-07-08T10:58:04.652Z", 
+        "extra_data": "{}"
     }
 }
 ]

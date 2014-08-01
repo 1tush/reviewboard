@@ -6,14 +6,13 @@ import subprocess
 import tempfile
 from difflib import SequenceMatcher
 
+from django.core.exceptions import ObjectDoesNotExist
 from django.utils import six
 from django.utils.translation import ugettext as _
 from djblets.log import log_timed
 from djblets.siteconfig.models import SiteConfiguration
 from djblets.util.contextmanagers import controlled_subprocess
 
-from reviewboard.accounts.models import Profile
-from reviewboard.admin.checks import get_can_enable_syntax_highlighting
 from reviewboard.scmtools.core import PRE_CREATION, HEAD
 
 
@@ -49,7 +48,7 @@ def convert_to_unicode(s, encoding_list):
             for e in encoding_list:
                 try:
                     return e, six.text_type(s, e)
-                except UnicodeError:
+                except (UnicodeError, LookupError):
                     pass
 
             # Finally, try to convert to unicode and replace all unknown
@@ -161,7 +160,7 @@ def get_original_file(filediff, request, encoding_list):
     """
     data = b""
 
-    if filediff.source_revision != PRE_CREATION:
+    if not filediff.is_new:
         repository = filediff.diffset.repository
         data = repository.get_file(
             filediff.source_file,
@@ -296,7 +295,7 @@ def get_diff_files(diffset, filediff=None, interdiffset=None, request=None):
     for parts in filediff_parts:
         filediff, interfilediff, force_interdiff = parts
 
-        newfile = (filediff.source_revision == PRE_CREATION)
+        newfile = filediff.is_new
 
         if interdiffset:
             # First, find out if we want to even process this one.
@@ -520,13 +519,12 @@ def get_enable_highlighting(user):
         try:
             profile = user.get_profile()
             user_syntax_highlighting = profile.syntax_highlighting
-        except Profile.DoesNotExist:
+        except ObjectDoesNotExist:
             pass
 
     siteconfig = SiteConfiguration.objects.get_current()
     return (siteconfig.get('diffviewer_syntax_highlighting') and
-            user_syntax_highlighting and
-            get_can_enable_syntax_highlighting())
+            user_syntax_highlighting)
 
 
 def get_line_changed_regions(oldline, newline):

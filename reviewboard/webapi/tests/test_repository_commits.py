@@ -2,7 +2,6 @@ from __future__ import unicode_literals
 
 from django.utils import six
 from djblets.testing.decorators import add_fixtures
-from djblets.webapi.errors import INVALID_FORM_DATA
 
 from reviewboard.webapi.resources import resources
 from reviewboard.webapi.errors import REPO_NOT_IMPLEMENTED
@@ -38,24 +37,13 @@ class ResourceTests(BaseWebAPITestCase):
         """Testing the GET repositories/<id>/commits/ API"""
         repository = self.create_repository(tool_name='Test')
 
-        rsp = self.apiGet(get_repository_commits_url(repository),
-                          query={'start': 5},
-                          expected_mimetype=repository_commits_item_mimetype)
+        rsp = self.api_get(get_repository_commits_url(repository),
+                           query={'start': 5},
+                           expected_mimetype=repository_commits_item_mimetype)
         self.assertEqual(rsp['stat'], 'ok')
         self.assertEqual(len(rsp['commits']), 5)
         self.assertEqual(rsp['commits'][0]['message'], 'Commit 5')
         self.assertEqual(rsp['commits'][3]['author_name'], 'user2')
-
-    def test_get_without_start(self):
-        """Testing the GET repositories/<id>/commits/ API
-        without providing a start parameter
-        """
-        repository = self.create_repository()
-        rsp = self.apiGet(get_repository_commits_url(repository),
-                          expected_status=400)
-        self.assertEqual(rsp['stat'], 'fail')
-        self.assertEqual(rsp['err']['code'], INVALID_FORM_DATA.code)
-        self.assertTrue('start' in rsp['fields'])
 
     @add_fixtures(['test_site'])
     def test_get_with_site(self):
@@ -64,7 +52,7 @@ class ResourceTests(BaseWebAPITestCase):
         repository = self.create_repository(with_local_site=True,
                                             tool_name='Test')
 
-        rsp = self.apiGet(
+        rsp = self.api_get(
             get_repository_commits_url(repository, self.local_site_name),
             query={'start': 7},
             expected_mimetype=repository_commits_item_mimetype)
@@ -80,7 +68,7 @@ class ResourceTests(BaseWebAPITestCase):
         """
         repository = self.create_repository(with_local_site=True)
 
-        self.apiGet(
+        self.api_get(
             get_repository_commits_url(repository, self.local_site_name),
             expected_status=403)
 
@@ -91,7 +79,7 @@ class ResourceTests(BaseWebAPITestCase):
         repository = self.create_repository(tool_name='CVS')
         repository.save()
 
-        rsp = self.apiGet(
+        rsp = self.api_get(
             get_repository_commits_url(repository),
             query={'start': ''},
             expected_status=501)

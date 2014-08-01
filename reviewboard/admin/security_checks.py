@@ -8,6 +8,7 @@ from django.contrib.sites.models import Site
 from django.core.files.base import ContentFile
 from django.core.files.storage import FileSystemStorage
 from django.utils import six
+from django.utils.six.moves.urllib.error import HTTPError
 from django.utils.six.moves.urllib.request import urlopen
 from django.utils.translation import ngettext
 from django.utils.translation import ugettext_lazy as _
@@ -38,7 +39,7 @@ class ExecutableCodeCheck(BaseSecurityCheck):
              'to review requests to be executed as code. The file types '
              'checked in this test are: .html, .htm, .shtml, .php, .php3, '
              '.php4, .php5, .phps, .asp, .pl, .py, .fcgi, .cgi, .phtml, '
-             '.pht, .jsp, .sh, and .rb.')
+             '.phtm, .pht, .jsp, .sh, and .rb.')
     fix_info = _('For instructions on how to fix this problem, please visit '
                  '<a href="http://support.beanbaginc.com/support/solutions/'
                  'articles/110173-securing-file-attachments">'
@@ -94,9 +95,25 @@ class ExecutableCodeCheck(BaseSecurityCheck):
 
     def setUp(self):
         if self._using_default_storage():
-            for extensions_list, content in self.file_checks:
+            for i, file_check in enumerate(self.file_checks):
+                extensions_list, content = file_check
+                bad_extensions = []
+
                 for ext in extensions_list:
-                    self.storage.save('exec_check' + ext, ContentFile(content))
+                    try:
+                        self.storage.save('exec_check' + ext,
+                                          ContentFile(content))
+                    except OSError:
+                        # Some web server configurations prevent even saving
+                        # files with certain extensions. In this case, things
+                        # will definitely succeed.
+                        bad_extensions.append(ext)
+
+                # Filter out any extensions that we failed to save, because we
+                # don't need to check that they downloaded properly.
+                extensions_list = [ext for ext in extensions_list
+                                   if ext not in bad_extensions]
+                self.file_checks[i] = extensions_list, content
 
     def execute(self):
         error_msg = ''
@@ -136,7 +153,15 @@ class ExecutableCodeCheck(BaseSecurityCheck):
                     self.storage.delete('exec_check' + ext)
 
     def download_and_compare(self, to_download):
-        data = urlopen(_get_url(self.directory) + to_download).read()
+        try:
+            data = urlopen(_get_url(self.directory) + to_download).read()
+        except HTTPError as e:
+            # An HTTP 403 is also an acceptable response
+            if e.code == 403:
+                return True
+            else:
+                raise e
+
         with self.storage.open(to_download, 'r') as f:
             return data == f.read()
 
@@ -150,7 +175,7 @@ class AllowedHostsCheck(BaseSecurityCheck):
     desc = _('ALLOWED_HOSTS is a list containing the host/domain names that '
              'Review Board will consider valid for this server to serve. '
              'This is a security measure to prevent an attacker from '
-             'poisoning cache and password reset emails with links to '
+             'poisoning cache and password reset e-mails with links to '
              'malicious hosts by submitting requests with a fake HTTP Host '
              'header, which is possible even under many seemingly-safe web '
              'server configurations.')

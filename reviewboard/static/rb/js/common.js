@@ -147,8 +147,8 @@ $.fn.formDlg = function(options) {
                     options.success(rsp);
                     box.remove();
                 },
-                error: function(rsp) { // error
-                    displayErrors(rsp);
+                error: function(model, xhr) {
+                    displayErrors($.parseJSON(xhr.responseText));
                 }
             });
         }
@@ -160,19 +160,13 @@ $.fn.formDlg = function(options) {
          * @param {object} rsp  The server response.
          */
         function displayErrors(rsp) {
-            var errorStr,
+            var errorStr = rsp.err.msg,
                 fieldName,
                 list,
                 i;
 
-            if (_.isObject(rsp)) {
-                errorStr = rsp.err.msg;
-
-                if (options.dataStoreObject.getErrorString) {
-                    errorStr = options.dataStoreObject.getErrorString(rsp);
-                }
-            } else {
-                errorStr = rsp;
+            if (options.dataStoreObject.getErrorString) {
+                errorStr = options.dataStoreObject.getErrorString(rsp);
             }
 
             errors
@@ -347,78 +341,95 @@ $.fn.searchAutoComplete = function() {
     });
 };
 
-var gUserInfoBoxCache = {};
+var gInfoBoxCache = {};
 
 /*
- * Displays a infobox when hovering over a user.
+ * Bug and user infoboxes. These are shown when hovering over links to users
+ * and bugs.
  *
  * The infobox is displayed after a 1 second delay.
  */
-$.fn.user_infobox = function() {
+$.fn.infobox = function(id) {
     var POPUP_DELAY_MS = 500,
         HIDE_DELAY_MS = 300,
         OFFSET_LEFT = -20,
         OFFSET_TOP = 10,
-        infobox = $("#user-infobox");
+        $infobox = $('#' + id);
 
-    if (infobox.length === 0) {
-        infobox = $("<div id='user-infobox'/>'").hide();
-        $(document.body).append(infobox);
+    if ($infobox.length === 0) {
+        $infobox = $('<div/>')
+            .attr('id', id)
+            .hide();
+        $(document.body).append($infobox);
+    }
+
+    function showInfobox(url, $target) {
+        $infobox
+            .empty()
+            .addClass('loading')
+            .html(gInfoBoxCache[url])
+            .positionToSide($target, {
+                side: 'tb',
+                xOffset: OFFSET_LEFT,
+                yDistance: OFFSET_TOP,
+                fitOnScreen: true
+            })
+            .fadeIn();
+
+        $infobox.find('.gravatar')
+            .retinaGravatar();
+    }
+
+    function fetchInfobox(url, $target) {
+        if (!gInfoBoxCache[url]) {
+            $.get(url, function(responseText) {
+                gInfoBoxCache[url] = responseText;
+            }).done(function() {
+                showInfobox(url, $target);
+            });
+        } else {
+            showInfobox(url, $target);
+        }
     }
 
     return this.each(function() {
-        var self = $(this),
+        var $target = $(this),
             timeout = null,
-            url = self.attr('href') + 'infobox/';
+            url = $target.attr('href') + 'infobox/';
 
-        self.on('mouseover', function() {
+        $target.on('mouseover', function() {
             timeout = setTimeout(function() {
-                var offset;
-
-                if (!gUserInfoBoxCache[url]) {
-                    infobox
-                        .empty()
-                        .addClass("loading")
-                        .load(url, function(responseText) {
-                            gUserInfoBoxCache[url] = responseText;
-                            infobox.removeClass("loading");
-                            infobox.find('.gravatar').retinaGravatar();
-                        });
-                } else {
-                    infobox.html(gUserInfoBoxCache[url]);
-                    infobox.find('.gravatar').retinaGravatar();
-                }
-
-                offset = self.offset();
-
-                infobox
-                    .positionToSide(self, {
-                        side: 'tb',
-                        xOffset: OFFSET_LEFT,
-                        yDistance: OFFSET_TOP,
-                        fitOnScreen: true
-                    })
-                    .fadeIn();
+                fetchInfobox(url, $target);
             }, POPUP_DELAY_MS);
         });
 
-        $([self[0], infobox[0]]).on({
+        $([$target[0], $infobox[0]]).on({
             mouseover: function() {
-                if (infobox.is(':visible')) {
+                if ($infobox.is(':visible')) {
                     clearTimeout(timeout);
                 }
             },
             mouseout: function() {
                 clearTimeout(timeout);
 
-                if (infobox.is(':visible')) {
+                if ($infobox.is(':visible')) {
                     timeout = setTimeout(function() {
-                        infobox.fadeOut();
+                        $infobox.fadeOut();
                     }, HIDE_DELAY_MS);
                 }
             }
         });
     });
+};
+
+$.fn.user_infobox = function() {
+    $(this).infobox('user_infobox');
+    return this;
+};
+
+$.fn.bug_infobox = function() {
+    $(this).infobox('bug_infobox');
+    return this;
 };
 
 
@@ -430,6 +441,7 @@ $(document).ready(function() {
 
     $("#search_field").searchAutoComplete();
     $('.user').user_infobox();
+    $('.bug').bug_infobox();
     $("time.timesince").timesince();
 
     $('.gravatar').retinaGravatar();

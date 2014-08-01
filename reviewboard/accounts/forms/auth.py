@@ -4,6 +4,9 @@ import re
 import sre_constants
 
 from django import forms
+from django.contrib.auth.models import User
+from django.contrib.auth.forms import \
+    AuthenticationForm as DjangoAuthenticationForm
 from django.core.exceptions import ValidationError
 from django.utils.safestring import mark_safe
 from django.utils.translation import ugettext_lazy as _
@@ -105,8 +108,8 @@ class StandardAuthSettingsForm(SiteSettingsForm):
               'register an account and type in your new keys below.')
             % {
                 'recaptcha_url': 'http://www.recaptcha.net/',
-                'register_url': 'https://admin.recaptcha.net/recaptcha'
-                                '/createsite/',
+                'register_url': 'https://www.google.com/recaptcha/admin'
+                                '#createsite',
             }),
         required=False)
 
@@ -297,7 +300,7 @@ class X509SettingsForm(SiteSettingsForm):
             #       mod_ssl.
             ("SSL_CLIENT_S_DN", _("DN (Distinguished Name)")),
             ("SSL_CLIENT_S_DN_CN", _("CN (Common Name)")),
-            ("SSL_CLIENT_S_DN_Email", _("Email address")),
+            ("SSL_CLIENT_S_DN_Email", _("E-mail address")),
         ),
         help_text=_("The X.509 certificate field from which the Review Board "
                     "username will be extracted."),
@@ -307,7 +310,7 @@ class X509SettingsForm(SiteSettingsForm):
         label=_("Username Regex"),
         help_text=_("Optional regex used to convert the selected X.509 "
                     "certificate field to a usable Review Board username. For "
-                    "example, if using the email field to retrieve the "
+                    "example, if using the e-mail field to retrieve the "
                     "username, use this regex to get the username from an "
                     "e-mail address: '(\s+)@yoursite.com'. There must be only "
                     "one group in the regex."),
@@ -334,3 +337,21 @@ class X509SettingsForm(SiteSettingsForm):
 
     class Meta:
         title = _('X.509 Client Certificate Authentication Settings')
+
+
+class AuthenticationForm(DjangoAuthenticationForm):
+    """Form used for user logins.
+
+    This extends Django's built-in AuthenticationForm implementation to allow
+    users to specify their e-mail address in place of their username.
+    """
+    def clean_username(self):
+        username = self.cleaned_data.get('username')
+
+        if not User.objects.filter(username=username).exists():
+            try:
+                username = User.objects.get(email=username).username
+            except (User.DoesNotExist, User.MultipleObjectsReturned):
+                pass
+
+        return username

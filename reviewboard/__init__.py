@@ -7,10 +7,12 @@ from __future__ import unicode_literals
 #
 #   (Major, Minor, Micro, Patch, alpha/beta/rc/final, Release Number, Released)
 #
-VERSION = (2, 0, 0, 0, 'rc', 3, True)
+VERSION = (2, 1, 0, 0, 'alpha', 0, False)
+
 
 # Required version of Django
-django_version = 'Django>=1.6.4,<1.7',
+django_version = 'Django>=1.6.5,<1.7'
+
 
 def get_version_string():
     version = '%s.%s' % (VERSION[0], VERSION[1])
@@ -50,6 +52,15 @@ def get_package_version():
 
 def is_release():
     return VERSION[6]
+
+
+def get_manual_url():
+    if VERSION[4] == 'final' and is_release():
+        manual_ver = '%s.%s' % (VERSION[0], VERSION[1])
+    else:
+        manual_ver = 'dev'
+
+    return 'https://www.reviewboard.org/docs/manual/%s/' % manual_ver
 
 
 def initialize():

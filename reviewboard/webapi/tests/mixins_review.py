@@ -27,7 +27,7 @@ class ReviewListMixin(ExtraDataListMixin):
         data['body_bottom'] = body_bottom
         data['text_type'] = text_type
 
-        rsp = self.apiPost(url, data, expected_mimetype=mimetype)
+        rsp = self.api_post(url, data, expected_mimetype=mimetype)
 
         self.assertEqual(rsp['stat'], 'ok')
         review_rsp = rsp[self.resource.item_result_key]
@@ -61,8 +61,8 @@ class ReviewItemMixin(ExtraDataItemMixin):
             'markdown',
             '`This` is **body_top**',
             '`This` is **body_bottom**',
-            r'\`This\` is \*\*body_top\*\*',
-            r'\`This\` is \*\*body_bottom\*\*')
+            r'\`This\` is \*\*body\_top\*\*',
+            r'\`This\` is \*\*body\_bottom\*\*')
 
     @test_template
     def test_put_with_text_type_plain_escaping_all_fields(self):
@@ -84,7 +84,7 @@ class ReviewItemMixin(ExtraDataItemMixin):
         self._test_put_with_text_type_escaping_unspecified_fields(
             'markdown',
             '`This` is **body_top**',
-            r'\`This\` is \*\*body_top\*\*')
+            r'\`This\` is \*\*body\_top\*\*')
 
     @test_template
     def test_put_with_text_type_plain_escaping_unspecified_fields(self):
@@ -114,15 +114,15 @@ class ReviewItemMixin(ExtraDataItemMixin):
             'body_bottom': '`This` is **body_bottom**',
         })
 
-        rsp = self.apiPut(url, data, expected_mimetype=mimetype)
+        rsp = self.api_put(url, data, expected_mimetype=mimetype)
 
         self.assertEqual(rsp['stat'], 'ok')
         review_rsp = rsp[self.resource.item_result_key]
         self.assertEqual(review_rsp['text_type'], 'markdown')
         self.assertEqual(review_rsp['body_top'],
-                         r'\`This\` is \*\*body_top\*\*')
+                         r'\`This\` is \*\*body\_top\*\*')
         self.assertEqual(review_rsp['body_bottom'],
-                         r'\`This\` is \*\*body_bottom\*\*')
+                         r'\`This\` is \*\*body\_bottom\*\*')
         self.compare_item(review_rsp,
                           self.resource.model.objects.get(pk=review_rsp['id']))
 
@@ -139,7 +139,7 @@ class ReviewItemMixin(ExtraDataItemMixin):
             'body_bottom': body_bottom,
         })
 
-        rsp = self.apiPut(url, data, expected_mimetype=mimetype)
+        rsp = self.api_put(url, data, expected_mimetype=mimetype)
 
         self.assertEqual(rsp['stat'], 'ok')
         review_rsp = rsp[self.resource.item_result_key]
@@ -172,7 +172,7 @@ class ReviewItemMixin(ExtraDataItemMixin):
 
         data['text_type'] = text_type
 
-        rsp = self.apiPut(url, data, expected_mimetype=mimetype)
+        rsp = self.api_put(url, data, expected_mimetype=mimetype)
 
         self.assertEqual(rsp['stat'], 'ok')
         review_rsp = rsp[self.resource.item_result_key]
@@ -205,7 +205,7 @@ class ReviewItemMixin(ExtraDataItemMixin):
         if 'body_top' in data:
             del data['body_top']
 
-        rsp = self.apiPut(url, data, expected_mimetype=mimetype)
+        rsp = self.api_put(url, data, expected_mimetype=mimetype)
 
         self.assertEqual(rsp['stat'], 'ok')
         review_rsp = rsp[self.resource.item_result_key]
