@@ -1634,10 +1634,10 @@ def _download_diff_file(modified, request, review_request_id, revision,
     diffset = _query_for_diff(review_request, request.user, revision, draft)
     filediff = get_object_or_404(diffset.files, pk=filediff_id)
     encoding_list = diffset.repository.get_encoding_list()
-    data = get_original_file(filediff, request, encoding_list)
+    data, encoding = get_original_file(filediff, request, encoding_list)
 
     if modified:
-        data = get_patched_file(data, filediff, request)
+        data = get_patched_file(data, filediff, request, encoding)
 
     data = convert_to_unicode(data, encoding_list)[1]
 

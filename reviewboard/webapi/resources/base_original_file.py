@@ -49,7 +49,7 @@ class BaseOriginalFileResource(WebAPIResource):
             return DOES_NOT_EXIST
 
         try:
-            orig_file = get_original_file(
+            orig_file, encoding = get_original_file(
                 filediff, request,
                 filediff.diffset.repository.get_encoding_list())
         except Exception as e:

@@ -50,7 +50,7 @@ class BasePatchedFileResource(WebAPIResource):
             return DOES_NOT_EXIST
 
         try:
-            orig_file = get_original_file(
+            orig_file, encoding = get_original_file(
                 filediff, request,
                 filediff.diffset.repository.get_encoding_list())
         except Exception as e:
@@ -61,7 +61,7 @@ class BasePatchedFileResource(WebAPIResource):
             return FILE_RETRIEVAL_ERROR
 
         try:
-            patched_file = get_patched_file(orig_file, filediff, request)
+            patched_file = get_patched_file(orig_file, filediff, request, encoding)
         except Exception as e:
             logging.error('%s: Error retrieving patched file for FileDiff %'
                           '%s: %s',

@@ -70,7 +70,7 @@ class SVNTool(SCMTool):
         self.config_dir, self.client = \
             self.build_client(self.repopath,
                               repository.username, repository.password,
-                              local_site_name)
+                              local_site_name, repository.get_encoding_list())
 
         # If we assign a function to the pysvn Client that accesses anything
         # bound to SVNClient, it'll end up keeping a reference and a copy of
@@ -388,7 +388,7 @@ class SVNTool(SCMTool):
 
     @classmethod
     def build_client(cls, repopath, username=None, password=None,
-                     local_site_name=None):
+                     local_site_name=None, encoding_list=None):
         if not has_svn_backend:
             raise ImportError(_(
                 'SVN integration requires either subvertpy or pysvn'))
@@ -401,7 +401,7 @@ class SVNTool(SCMTool):
         elif not os.path.exists(config_dir):
             cls._create_subversion_dir(config_dir)
 
-        client = Client(config_dir, repopath, username, password)
+        client = Client(config_dir, repopath, username, password, encoding_list)
 
         return config_dir, client
 

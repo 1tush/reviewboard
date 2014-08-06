@@ -23,6 +23,7 @@ from django.utils.translation import ugettext as _
 from reviewboard.scmtools.core import Revision, HEAD, PRE_CREATION
 from reviewboard.scmtools.errors import FileNotFoundError, SCMError
 from reviewboard.scmtools.svn import base
+from reviewboard.diffviewer.diffutils import convert_to_unicode
 
 B = six.binary_type
 DIFF_UNIFIED = [B('-u')]
@@ -32,8 +33,8 @@ SVN_KEYWORDS = B('svn:keywords')
 class Client(base.Client):
     required_module = 'subvertpy'
 
-    def __init__(self, config_dir, repopath, username=None, password=None):
-        super(Client, self).__init__(config_dir, repopath, username, password)
+    def __init__(self, config_dir, repopath, username=None, password=None, encoding_list=None):
+        super(Client, self).__init__(config_dir, repopath, username, password, encoding_list)
         self.repopath = B(self.repopath)
         self.config_dir = B(config_dir)
 
@@ -316,7 +317,8 @@ class Client(base.Client):
                                         B(path),
                                         diffopts=DIFF_UNIFIED)
 
-            diff = out.read().decode('utf-8')
+            diff = out.read()
+            _, diff = convert_to_unicode(diff, self.encoding_list)
         except Exception as e:
             logging.error('Failed to generate diff using subvertpy for '
                           'revisions %s:%s for path %s: %s',

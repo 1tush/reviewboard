@@ -159,7 +159,7 @@ def get_original_file(filediff, request, encoding_list):
     SCM exceptions are passed back to the caller.
     """
     data = b""
-
+    encoding = "utf-8"
     if not filediff.is_new:
         repository = filediff.diffset.repository
         data = repository.get_file(
@@ -191,13 +191,13 @@ def get_original_file(filediff, request, encoding_list):
         data = patch(filediff.parent_diff, data, filediff.source_file,
                      request)
 
-    return data
+    return data, encoding
 
 
-def get_patched_file(buffer, filediff, request):
+def get_patched_file(buffer, filediff, request, encoding):
     tool = filediff.diffset.repository.get_scmtool()
     diff = tool.normalize_patch(filediff.diff, filediff.source_file,
-                                filediff.source_revision)
+                                filediff.source_revision).decode('utf-8').encode(encoding)
     return patch(diff, buffer, filediff.dest_file, request)
 
 
