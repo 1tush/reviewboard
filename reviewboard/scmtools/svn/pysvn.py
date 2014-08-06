@@ -273,7 +273,7 @@ class Client(base.Client):
                 revision2=self._normalize_revision(revision2),
                 header_encoding='UTF-8',
                 diff_options=['-u'])
-            _, diff = convert_to_unicode(diff, self.encoding_list)
+            encoding, diff = convert_to_unicode(diff, self.encoding_list)
         except Exception as e:
             logging.error('Failed to generate diff using pysvn for revisions '
                           '%s:%s for path %s: %s',
