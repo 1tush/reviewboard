@@ -4,6 +4,7 @@ import logging
 
 from django.http import HttpResponse
 from django.utils.six.moves.urllib.parse import quote as urllib_quote
+from django.utils.translation import ugettext as _
 from djblets.util.http import set_last_modified
 from djblets.webapi.errors import DOES_NOT_EXIST, WebAPIError
 

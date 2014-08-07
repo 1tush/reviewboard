@@ -707,9 +707,8 @@ def review_detail(request,
         'close_description_rich_text': close_description_rich_text,
         'issues': issues,
         'has_diffs': (draft and draft.diffset) or len(diffsets) > 0,
-        'file_attachments': [file_attachment
-                             for file_attachment in file_attachments
-                             if not file_attachment.is_from_diff],
+        'file_attachments': [fa for fa in file_attachments
+                             if not fa.is_from_diff],
         'all_file_attachments': file_attachments,
         'screenshots': screenshots,
     })

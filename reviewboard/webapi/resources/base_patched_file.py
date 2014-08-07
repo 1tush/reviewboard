@@ -4,6 +4,7 @@ import logging
 
 from django.http import HttpResponse
 from django.utils.six.moves.urllib.parse import quote as urllib_quote
+from django.utils.translation import ugettext as _
 from djblets.util.http import set_last_modified
 from djblets.webapi.errors import DOES_NOT_EXIST, WebAPIError
 
@@ -61,7 +62,8 @@ class BasePatchedFileResource(WebAPIResource):
             return FILE_RETRIEVAL_ERROR
 
         try:
-            patched_file = get_patched_file(orig_file, filediff, request, encoding)
+            patched_file = get_patched_file(orig_file, filediff,
+                                            request, encoding)
         except Exception as e:
             logging.error('%s: Error retrieving patched file for FileDiff %'
                           '%s: %s',
