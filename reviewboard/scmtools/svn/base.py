@@ -37,7 +37,8 @@ class Client(object):
         'URL':                 URL_KEYWORDS,
     }
 
-    def __init__(self, config_dir, repopath, username=None, password=None, encoding_list=None):
+    def __init__(self, config_dir, repopath, username=None,
+                 password=None, encoding_list=None):
         self.repopath = repopath
         if encoding_list is not None:
             self.encoding_list = encoding_list

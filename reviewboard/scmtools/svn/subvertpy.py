@@ -33,8 +33,10 @@ SVN_KEYWORDS = B('svn:keywords')
 class Client(base.Client):
     required_module = 'subvertpy'
 
-    def __init__(self, config_dir, repopath, username=None, password=None, encoding_list=None):
-        super(Client, self).__init__(config_dir, repopath, username, password, encoding_list)
+    def __init__(self, config_dir, repopath, username=None,
+                 password=None, encoding_list=None):
+        super(Client, self).__init__(config_dir, repopath, username,
+                                     password, encoding_list)
         self.repopath = B(self.repopath)
         self.config_dir = B(config_dir)
 
@@ -318,7 +320,7 @@ class Client(base.Client):
                                         diffopts=DIFF_UNIFIED)
 
             diff = out.read()
-            _, diff = convert_to_unicode(diff, self.encoding_list)
+            encoding, diff = convert_to_unicode(diff, self.encoding_list)
         except Exception as e:
             logging.error('Failed to generate diff using subvertpy for '
                           'revisions %s:%s for path %s: %s',

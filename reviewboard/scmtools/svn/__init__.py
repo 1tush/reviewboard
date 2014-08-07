@@ -401,7 +401,8 @@ class SVNTool(SCMTool):
         elif not os.path.exists(config_dir):
             cls._create_subversion_dir(config_dir)
 
-        client = Client(config_dir, repopath, username, password, encoding_list)
+        client = Client(config_dir, repopath, username,
+                        password, encoding_list)
 
         return config_dir, client
 

@@ -33,8 +33,10 @@ from reviewboard.diffviewer.diffutils import convert_to_unicode
 class Client(base.Client):
     required_module = 'pysvn'
 
-    def __init__(self, config_dir, repopath, username=None, password=None, encoding_list=None):
-        super(Client, self).__init__(config_dir, repopath, username, password, encoding_list)
+    def __init__(self, config_dir, repopath, username=None,
+                 password=None, encoding_list=None):
+        super(Client, self).__init__(config_dir, repopath, username,
+                                     password, encoding_list)
         self.client = pysvn.Client(config_dir)
 
         if username:
@@ -274,7 +276,7 @@ class Client(base.Client):
                 revision2=self._normalize_revision(revision2),
                 header_encoding='UTF-8',
                 diff_options=['-u'])
-            _, diff = convert_to_unicode(diff, self.encoding_list)
+            encoding, diff = convert_to_unicode(diff, self.encoding_list)
         except Exception as e:
             logging.error('Failed to generate diff using pysvn for revisions '
                           '%s:%s for path %s: %s',
