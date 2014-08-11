@@ -703,9 +703,8 @@ def review_detail(request,
         'PRE_CREATION': PRE_CREATION,
         'issues': issues,
         'has_diffs': (draft and draft.diffset) or len(diffsets) > 0,
-        'file_attachments': [file_attachment
-                             for file_attachment in file_attachments
-                             if not file_attachment.is_from_diff],
+        'file_attachments': [fa for fa in file_attachments
+                             if not fa.is_from_diff],
         'all_file_attachments': file_attachments,
         'screenshots': screenshots,
     })
@@ -1570,7 +1569,7 @@ def _download_diff_file(modified, request, review_request_id, revision,
     diffset = _query_for_diff(review_request, request.user, revision, draft)
     filediff = get_object_or_404(diffset.files, pk=filediff_id)
     encoding_list = diffset.repository.get_encoding_list()
-    data = get_original_file(filediff, request, encoding_list)
+    data, encoding = get_original_file(filediff, request, encoding_list)
 
     if modified:
         data = get_patched_file(data, filediff, request)

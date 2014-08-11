@@ -27,13 +27,16 @@ from reviewboard.scmtools.errors import (AuthenticationError,
                                          FileNotFoundError,
                                          SCMError)
 from reviewboard.scmtools.svn import base
+from reviewboard.diffviewer.diffutils import convert_to_unicode
 
 
 class Client(base.Client):
     required_module = 'pysvn'
 
-    def __init__(self, config_dir, repopath, username=None, password=None):
-        super(Client, self).__init__(config_dir, repopath, username, password)
+    def __init__(self, config_dir, repopath, username=None,
+                 password=None, encoding_list=None):
+        super(Client, self).__init__(config_dir, repopath, username,
+                                     password, encoding_list)
         self.client = pysvn.Client(config_dir)
 
         if username:
@@ -265,13 +268,19 @@ class Client(base.Client):
         tmpdir = mkdtemp(prefix='reviewboard-svn.')
 
         try:
+            logging.debug('tmpdir: %r' % tmpdir)
+            logging.debug('path: %r' % path)
+            logging.debug('repopath: %r' % self.repopath)
+            logging.debug('revision1: %r' % revision1)
+            logging.debug('revision2: %r' % revision2)
             diff = self.client.diff(
                 tmpdir,
                 path,
                 revision1=self._normalize_revision(revision1),
                 revision2=self._normalize_revision(revision2),
                 header_encoding='UTF-8',
-                diff_options=['-u']).decode('utf-8')
+                diff_options=['-u'])
+            encoding, diff = convert_to_unicode(diff, self.encoding_list)
         except Exception as e:
             logging.error('Failed to generate diff using pysvn for revisions '
                           '%s:%s for path %s: %s',

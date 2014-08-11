@@ -156,14 +156,15 @@ class DiffChunkGenerator(object):
         """Returns the list of chunks, bypassing the cache."""
         encoding_list = self.diffset.repository.get_encoding_list()
 
-        old = get_original_file(self.filediff, self.request, encoding_list)
+        old, encoding = get_original_file(self.filediff, self.request,
+                                          encoding_list)
         new = get_patched_file(old, self.filediff, self.request)
 
         if self.interfilediff:
             old = new
-            interdiff_orig = get_original_file(self.interfilediff,
-                                               self.request,
-                                               encoding_list)
+            interdiff_orig, encoding = get_original_file(self.interfilediff,
+                                                         self.request,
+                                                         encoding_list)
             new = get_patched_file(interdiff_orig, self.interfilediff,
                                    self.request)
         elif self.force_interdiff:

@@ -174,8 +174,8 @@ RB.DiffViewerPageView = RB.ReviewablePageView.extend({
         this.listenTo(this._paginationView2, 'pageSelected',
                       _.partial(this._onPageSelected, true));
 
-        $('#diffs').bindClass(RB.UserSession.instance,
-                              'diffsShowExtraWhitespace', 'ewhl');
+        // $('#diffs').bindClass(RB.UserSession.instance,
+        //                       'diffsShowExtraWhitespace', 'ewhl');
 
         this._setFiles();
 

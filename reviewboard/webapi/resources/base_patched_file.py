@@ -4,6 +4,7 @@ import logging
 
 from django.http import HttpResponse
 from django.utils.six.moves.urllib.parse import quote as urllib_quote
+from django.utils.translation import ugettext as _
 from djblets.util.http import set_last_modified
 from djblets.webapi.errors import DOES_NOT_EXIST, WebAPIError
 
@@ -50,7 +51,7 @@ class BasePatchedFileResource(WebAPIResource):
             return DOES_NOT_EXIST
 
         try:
-            orig_file = get_original_file(
+            orig_file, encoding = get_original_file(
                 filediff, request,
                 filediff.diffset.repository.get_encoding_list())
         except Exception as e:

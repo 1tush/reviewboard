@@ -37,8 +37,14 @@ class Client(object):
         'url':                 URL_KEYWORDS,
     }
 
-    def __init__(self, config_dir, repopath, username=None, password=None):
+    def __init__(self, config_dir, repopath, username=None,
+                 password=None, encoding_list=None):
         self.repopath = repopath
+
+        if encoding_list is not None:
+            self.encoding_list = encoding_list
+        else:
+            self.encoding_list = ['utf-8']
 
     def set_ssl_server_trust_prompt(self, cb):
         raise NotImplementedError
