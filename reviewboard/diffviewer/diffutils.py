@@ -197,7 +197,8 @@ def get_original_file(filediff, request, encoding_list):
 def get_patched_file(buffer, filediff, request, encoding):
     tool = filediff.diffset.repository.get_scmtool()
     diff = tool.normalize_patch(filediff.diff, filediff.source_file,
-                                filediff.source_revision).decode('utf-8').encode(encoding)
+                                filediff.source_revision
+                                ).decode('utf-8').encode(encoding)
     return patch(diff, buffer, filediff.dest_file, request)
 
 
