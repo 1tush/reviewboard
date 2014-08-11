@@ -268,11 +268,6 @@ class Client(base.Client):
         tmpdir = mkdtemp(prefix='reviewboard-svn.')
 
         try:
-            logging.debug('tmpdir: %r' % tmpdir)
-            logging.debug('path: %r' % path)
-            logging.debug('repopath: %r' % self.repopath)
-            logging.debug('revision1: %r' % revision1)
-            logging.debug('revision2: %r' % revision2)
             diff = self.client.diff(
                 tmpdir,
                 path,

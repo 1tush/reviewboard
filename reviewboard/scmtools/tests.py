@@ -1143,6 +1143,14 @@ class CommonSVNTestsBase(SCMTestCase):
         """Testing SVN (<backend>) with UTF-8 files with keywords"""
         self.repository.get_file('trunk/utf8-file.txt', '9')
 
+    def test_normalize_path_with_intersection(self):
+        """Testing correct concat svn repopath and path"""
+        path = self.tool.client.normalize_path(
+            '/testdata/svn_repo/branches/branch1'
+        )
+        self.assertEqual('file://' + self.svn_repo_path + '/branches/branch1',
+                         path)
+
 
 class PySVNTests(CommonSVNTestsBase):
     backend = 'reviewboard.scmtools.svn.pysvn'
