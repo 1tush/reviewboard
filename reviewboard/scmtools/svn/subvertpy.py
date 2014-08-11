@@ -278,7 +278,10 @@ class Client(base.Client):
             depth = 2  # Immediate files in this path. Only in 1.5+.
         else:
             depth = 0  # This will trigger recurse=False for SVN < 1.5.
+
+        # subcrtpy asserts that svn_uri not ends with slash
         norm_path = B(self.normalize_path(path)).rstrip('/')
+
         dirents = self.client.list(norm_path, None, depth)
 
         for name, dirent in six.iteritems(dirents):
